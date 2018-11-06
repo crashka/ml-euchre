@@ -1,0 +1,23 @@
+---
+default:
+  players:
+    west:
+      name:         'Addie'
+      strategy:
+        bid_class:  null
+        play_class: null
+    north:
+      name:         'Bradley'
+      strategy:
+        bid_class:  null
+        play_class: null
+    south:
+      name:         'Cyrus'
+      strategy:
+        bid_class:  null
+        play_class: null
+    east:
+      name:         'Dhalia'
+      strategy:
+        bid_class:  null
+        play_class: null

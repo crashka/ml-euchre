@@ -17,11 +17,16 @@ from core import cfg, env, log, dbg_hand
 random.seed(3)
 
 def validatebasedata(basedata):
+    """Make sure that the embedded index for base data elements matches the position
+    within the data structure
+
+    :return: void (failed assert on validation error)
+    """
     for elem in basedata:
         assert elem['idx'] == basedata.index(elem)
 
 ##############
-# Cards/Deck #
+# Base Cards #
 ##############
 
 """
@@ -86,7 +91,7 @@ validatebasedata(SUITS)
 validatebasedata(CARDS)
 
 ###############
-# Seats/Table #
+# Table Seats #
 ###############
 
 west     = {'idx' : 0, 'name': 'west',  'tag': 'W'}
@@ -98,9 +103,9 @@ SEATS    = [west, north, east, south]
 
 validatebasedata(SEATS)
 
-###############
-# Games/Match #
-###############
+#########
+# Match #
+#########
 
 MATCH_GAMES_DFLT = 2
 
@@ -113,33 +118,83 @@ class Match(object):
     def __init__(self, match_games = MATCH_GAMES_DFLT):
         self.match_games = match_games
         self.games       = []
-        self.deals       = []
-        self.dealer      = None
+        self.curdealer   = None
+        self.curgame     = None
 
     def nextdealer(self):
         """
-        :return: void (sets self.dealer)
+        :return: seat (new value for self.curdealer)
         """
-        if self.dealer:
-            dealer_seat = SEATS.index(self.dealer)
-            self.dealer = SEATS[(dealer_seat + 1) % 4]
+        if self.curdealer:
+            dealer_seat = SEATS.index(self.curdealer)
+            self.curdealer = SEATS[(dealer_seat + 1) % 4]
         else:
-            self.flipforjacks()
-            assert self.dealer in SEATS
+            self.curdealer = self.flipforjacks()
+            assert self.curdealer in SEATS
+
+        return self.curdealer
 
     def flipforjacks(self):
         """
-        :return: void (sets self.dealer)
+        :return: seat
         """
-        self.dealer = INIT_DEALER_DFLT
+        return random.choice(SEATS)
+
+    def newgame(self):
+        """
+        """
+        self.curgame = Game(self)
+        self.games.append(self.curgame)
+        return self.curgame
+
+########
+# Game #
+########
 
 # TEMP: make this global for now (LATER, can be subordinate to higher-level entities, such as
 # tables, tournaments, etc.)!!!
 MATCH = Match()
 
-##############
-# Deal/Hands #
-##############
+class Game(object):
+    """
+    """
+    def __init__(self, match = MATCH):
+        self.match     = match
+        self.deals     = []
+        self.curdealer = None
+        self.curdeal   = None
+
+    def newdeal(self):
+        """
+        """
+        self.curdealer = self.match.nextdealer()
+        self.curdeal = Deal(self)
+        self.deals.append(self.curdeal)
+        return self.curdeal
+
+    def update_score(self):
+        """Update score based on completed deal (self.curdeal)
+        """
+        pass
+
+########
+# Deal #
+########
+
+class Card(object):
+    """Represents an instance of a card that is part of a deal; the "basecard"
+    is the underlying immutable card identity (e.g. rank, suit, and name) that is
+    independent of deal status, trump, etc.
+    """
+    def __init__(self, basecard):
+        self.base     = basecard
+        self.is_trump = None
+
+    def __getattr__(self, key):
+        try:
+            return self.base[key]
+        except KeyError:
+            raise AttributeError()
 
 class Deal(object):
     """Represents a single shuffle, deal, bidding, and playing of the cards
@@ -147,19 +202,35 @@ class Deal(object):
     Note: our notion of a "deal" is also popularly called a "hand", but we are reserving that
     word to mean the holding of five dealt cards by a player during a deal
     """
-    def __init__(self, match = MATCH):
-        self.match    = match
-        self.dealer   = match.dealer
-        self.pos      = None  # [first to bid, dealer partner, third position, dealer]
-        self.deck     = None  # [card, ...] (shuffled)
-        self.hands    = None  # [[card, ...], [card, ...], ...]
-        self.bury     = None  # [card, ...] (len 3 during first round bids, otherwise len 4)
+    def __init__(self, game):
+        self.game     = game
+        self.match    = game.match
+        self.dealer   = game.match.curdealer
+        self.deck     = None  # [cards] -- shuffled
+        self.hands    = None  # [hands] -- ordered by position (0 = first bid, 3 = dealer)
+        self.bury     = None  # [cards] -- len 3 during first round bids, otherwise len 4
         self.turncard = None  # card
-        self.trump    = None  # suit
-        self.caller   = None  # seat
-        self.call_pos = None  # pos
+        self.discard  = None  # card
 
-        match.deals.append(self)
+        self.bids     = None  # [(bidder_hand, bid), ...]
+        self.contract = None  # suit -- (for now...perhaps will be a structure in the future)
+        self.caller   = None  # hand
+        self.plays    = None  # [(player_hand, card), ...]
+        self.tricks   = None  # [(winner_hand, [cards]), ...]
+        self.lead     = None  # hand
+
+    def play(self):
+        """
+        :return: void
+        """
+        # shuffle and deal
+        self.shuffle()
+        self.deal()
+        self.dump()
+
+        # bidding and playing tricks
+        self.bid()
+        self.playtricks()
 
     def shuffle(self, force = False):
         """
@@ -167,11 +238,11 @@ class Deal(object):
         """
         if self.deck and not force:
             raise RuntimeError("Cannot shuffle if deck is already shuffled")
-        self.deck = random.sample(CARDS, k=len(CARDS))
+        self.deck = [Card(c) for c in random.sample(CARDS, k=len(CARDS))]
 
     def deal(self, force = False):
         """
-        :return: void (sets obj instance state)
+        :return: void
         """
         if self.hands and not force:
             raise RuntimeError("Cannot deal when hands have been dealt")
@@ -193,6 +264,73 @@ class Deal(object):
         self.bury = self.deck[cardno:]
         self.turncard = self.bury.pop()
 
+        self.bids = []
+
+    def bid(self):
+        """
+        :return: void
+        """
+        return
+        bidder = self.hands[0]
+        while len(self.bids) < 8:
+            bid = bidding.bid(bidder)
+            self.bids.append(bid)
+            # REVISIT: None means pass for now, but LATER we may want to always pass back
+            # a structure containing insight into bid decision, so we would have to check
+            # for a pass within it explicitly!!!
+            if bid:
+                break
+            bidder = bidder.next()
+
+        if bid:
+            self.caller   = bidder
+            self.contract = bid
+            self.plays    = []  # [(player_hand, card), ...]
+            self.tricks   = []  # [(winner_hand, [cards]), ...]
+            self.lead     = self.hands[0]
+
+        return bid  # see REVISIT above on interpretation of bid
+
+    def playtricks(self):
+        """
+        :return: void
+        """
+        return
+        plays   = []            # [(player, card), ...]
+        player  = self.lead
+        winning = (None, None)  # (player, card)
+        while len(plays) < 4:
+            card = playing.play(player)
+            plays.append((player, card))
+            if not winning[1]:
+                winning = (player, card)
+            else:
+                winning_card = winning[1]
+                if self.cmpcard(winning_card, card) > 0:
+                    winning = (player, card)
+            player = player.next()
+
+    def dump(self, what = None):
+        """
+        :return: void
+        """
+        log.debug("Deal #%d" % (len(self.game.deals)))
+
+        if self.dealer:
+            log.debug("  Dealer: %s" % (self.dealer['name']))
+
+        if self.hands:
+            log.debug("  Hands:")
+            for hand in self.hands:
+                log.debug("    %-5s (%d): %s" % (hand.seat['name'], hand.pos, [c.tag for c in hand.cards]))
+
+            log.debug("  Turncard: %s" % (self.turncard.tag))
+            log.debug("  Buried: %s" % ([c.tag for c in self.bury]))
+
+########
+# Hand #
+########
+
 class Hand(object):
     """
     """
@@ -205,6 +343,9 @@ class Hand(object):
         self.partner_pos = (pos + 2) % 4
         self.prev_pos    = (pos + 3) % 4
 
+    def next(self):
+        return self.deal.hands[self.next_pos]
+
 ###########
 # Testing #
 ###########
@@ -214,24 +355,8 @@ if debug > 0:
     log.setLevel(logging.DEBUG)
     log.addHandler(dbg_hand)
 
-def printdeal(deal):
-    print("\nDeal #%d" % (len(deal.match.deals)))
-    print("  Dealer: %s" % (deal.dealer['name']))
-
-    print("\n  Hands:")
-    for hand in deal.hands:
-        print("    %-5s (%d): %s" % (hand.seat['name'], hand.pos, [c['tag'] for c in hand.cards]))
-
-    print("\n  Turncard: %s" % (deal.turncard['tag']))
-    print("  Buried: %s" % ([c['tag'] for c in deal.bury]))
-
 if __name__ == '__main__':
-    m = Match()
-
+    g = MATCH.newgame()
     for i in range(0, 4):
-        m.nextdealer()
-        d = Deal(m)
-        d.shuffle()
-        d.deal()
-
-        printdeal(d)
+        d = g.newdeal()
+        d.play()
