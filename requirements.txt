@@ -1,0 +1,5 @@
+pyyaml
+#click
+#psycopg2-binary
+#sqlalchemy
+#regex
