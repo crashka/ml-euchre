@@ -1,5 +1,7 @@
 ---
 default:
+  params:
+    random_seed:    2837527
   players:
     west:
       name:         'Addie'

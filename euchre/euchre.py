@@ -7,101 +7,10 @@ import logging
 import logging.handlers
 import random
 
-from core import cfg, env, log, dbg_hand
-
-#########
-# Setup #
-#########
-
-# TEMP/DEV: hardwire the seed for initial dev/testing
-random.seed(3)
-
-def validatebasedata(basedata):
-    """Make sure that the embedded index for base data elements matches the position
-    within the data structure
-
-    :return: void (failed assert on validation error)
-    """
-    for elem in basedata:
-        assert elem['idx'] == basedata.index(elem)
-
-##############
-# Base Cards #
-##############
-
-"""
-Suits
-    C - 0
-    D - 1
-    H - 2
-    S - 3
-
-Companion suit
-    suit ^ 0x3
-
-Cards (id and rank)
-    9  - 0-3   (0)
-    10 - 4-7   (1)
-    J  - 8-11  (2)
-    Q  - 12-15 (3)
-    K  - 16-19 (4)
-    A  - 20-23 (5)
-
-    L  - 24-27 (6)
-    R  - 28-31 (7)
-
-Suit
-    card % 4
-
-Rank
-    card // 4
-"""
-
-nine     = {'idx' : 0, 'name': 'nine',  'tag': '9'}
-ten      = {'idx' : 1, 'name': 'ten',   'tag': '10'}
-jack     = {'idx' : 2, 'name': 'jack',  'tag': 'J'}
-queen    = {'idx' : 3, 'name': 'queen', 'tag': 'Q'}
-king     = {'idx' : 4, 'name': 'king',  'tag': 'K'}
-ace      = {'idx' : 5, 'name': 'ace',   'tag': 'A'}
-
-RANKS    = [nine, ten, jack, queen, king, ace]
-
-clubs    = {'idx' : 0, 'name': 'clubs',    'tag': '\u2663'}
-diamonds = {'idx' : 1, 'name': 'diamonds', 'tag': '\u2666'}
-hearts   = {'idx' : 2, 'name': 'hearts',   'tag': '\u2665'}
-spades   = {'idx' : 3, 'name': 'spades',   'tag': '\u2660'}
-
-SUITS    = [clubs, diamonds, hearts, spades]
-
-CARDS = []
-for idx in range(0, 24):
-    rank = RANKS[idx // 4]
-    suit = SUITS[idx % 4]
-    card = {'idx' : idx,
-            'rank': rank,
-            'suit': suit,
-            'name': "%s of %s" % (rank['name'].capitalize(),
-                                  suit['name'].capitalize()),
-            'tag' : "%s%s" % (rank['tag'], suit['tag'])
-    }
-    CARDS.append(card)
-
-validatebasedata(RANKS)
-validatebasedata(SUITS)
-validatebasedata(CARDS)
-
-###############
-# Table Seats #
-###############
-
-west     = {'idx' : 0, 'name': 'west',  'tag': 'W'}
-north    = {'idx' : 1, 'name': 'north', 'tag': 'N'}
-east     = {'idx' : 2, 'name': 'east',  'tag': 'E'}
-south    = {'idx' : 3, 'name': 'south', 'tag': 'S'}
-
-SEATS    = [west, north, east, south]
-
-validatebasedata(SEATS)
+from core import param, log, dbg_hand, RANKS, SUITS, CARDS, SEATS, TEAMS
+from hand import Card, Hand
+import bidding
+import playing
 
 #########
 # Match #
@@ -109,13 +18,12 @@ validatebasedata(SEATS)
 
 MATCH_GAMES_DFLT = 2
 
-# TEMP: until flipforjacks() is implemented!!!
-INIT_DEALER_DFLT = south
-
 class Match(object):
     """Represents a set of games (race to 2, by default) played by two teams
     """
     def __init__(self, match_games = MATCH_GAMES_DFLT):
+        """
+        """
         self.match_games = match_games
         self.games       = []
         self.curdealer   = None
@@ -142,6 +50,7 @@ class Match(object):
 
     def newgame(self):
         """
+        :return: new Game instance
         """
         self.curgame = Game(self)
         self.games.append(self.curgame)
@@ -159,6 +68,8 @@ class Game(object):
     """
     """
     def __init__(self, match = MATCH):
+        """
+        """
         self.match     = match
         self.deals     = []
         self.curdealer = None
@@ -166,6 +77,7 @@ class Game(object):
 
     def newdeal(self):
         """
+        :return: new Deal instance
         """
         self.curdealer = self.match.nextdealer()
         self.curdeal = Deal(self)
@@ -181,21 +93,6 @@ class Game(object):
 # Deal #
 ########
 
-class Card(object):
-    """Represents an instance of a card that is part of a deal; the "basecard"
-    is the underlying immutable card identity (e.g. rank, suit, and name) that is
-    independent of deal status, trump, etc.
-    """
-    def __init__(self, basecard):
-        self.base     = basecard
-        self.is_trump = None
-
-    def __getattr__(self, key):
-        try:
-            return self.base[key]
-        except KeyError:
-            raise AttributeError()
-
 class Deal(object):
     """Represents a single shuffle, deal, bidding, and playing of the cards
 
@@ -203,6 +100,8 @@ class Deal(object):
     word to mean the holding of five dealt cards by a player during a deal
     """
     def __init__(self, game):
+        """
+        """
         self.game     = game
         self.match    = game.match
         self.dealer   = game.match.curdealer
@@ -217,20 +116,29 @@ class Deal(object):
         self.caller   = None  # hand
         self.plays    = None  # [(player_hand, card), ...]
         self.tricks   = None  # [(winner_hand, [cards]), ...]
-        self.lead     = None  # hand
+
+    @property
+    def deal_num(self):
+        """Only valid for current deal within game
+        """
+        assert self.game.curdeal == self
+        return len(self.game.deals)
 
     def play(self):
         """
         :return: void
         """
         # shuffle and deal
+        log.debug("Deal #%d: dealer is %s" % (self.deal_num, self.dealer['name']))
         self.shuffle()
         self.deal()
-        self.dump()
 
         # bidding and playing tricks
-        self.bid()
-        self.playtricks()
+        bid = self.bid()
+        if bid:
+            score = self.playtricks()
+
+        self.tabulate()
 
     def shuffle(self, force = False):
         """
@@ -263,14 +171,16 @@ class Deal(object):
         self.hands.sort(key=lambda h: h.pos)
         self.bury = self.deck[cardno:]
         self.turncard = self.bury.pop()
+        if param.get('debug'):
+            self.dump()
 
         self.bids = []
 
     def bid(self):
         """
-        :return: void
+        :return: suit (trunp) or None (meaning passed deal)
         """
-        return
+        log.debug("Bidding for deal #%d begins" % (self.deal_num))
         bidder = self.hands[0]
         while len(self.bids) < 8:
             bid = bidding.bid(bidder)
@@ -279,7 +189,9 @@ class Deal(object):
             # a structure containing insight into bid decision, so we would have to check
             # for a pass within it explicitly!!!
             if bid:
+                log.debug("  %s calls %s" % (bidder.seat['name'], bid['name']))
                 break
+            log.debug("  %s passes" % (bidder.seat['name']))
             bidder = bidder.next()
 
         if bid:
@@ -287,76 +199,120 @@ class Deal(object):
             self.contract = bid
             self.plays    = []  # [(player_hand, card), ...]
             self.tricks   = []  # [(winner_hand, [cards]), ...]
-            self.lead     = self.hands[0]
+            log.debug("%s is trump, called by %s" %
+                      (bid['name'].capitalize(), TEAMS[bidder.team_idx]['tag']))
+        else:
+            log.debug("Deal is passed")
 
         return bid  # see REVISIT above on interpretation of bid
 
+    def cmpcards(self, lead, winning, played):
+        """
+        :param lead: Card led for trick
+        :param winning: Card currently winning
+        :param played: Card last played
+        :return: int (negative if played loses, positive if played wins)
+        """
+        ret = None
+        winning_trump = winning.suit == self.contract
+        played_trump  = played.suit == self.contract
+        followed_suit = played.suit == lead.suit
+        if winning_trump:
+            ret = played.level - winning.level if played_trump else -played.level
+        elif played_trump:
+            ret = played.level
+        else:
+            ret = played.level - winning.level if followed_suit else -played.level
+        return ret
+
     def playtricks(self):
+        """
+        :return: score [E/W tricks, N/S tricks]
+        """
+        tricks = [0, 0]
+        player  = self.hands[0]
+        while len(self.tricks) < 5:
+            plays   = []            # [(player_hand, card), ...]
+            cards   = []            # [cards]
+            winning = (None, None)  # (player_hand, card)
+            while len(plays) < 4:
+                note = ''
+                winning_hand = winning[0]
+                winning_card = winning[1]
+                card = playing.play(player)
+                cards.append(card)
+                plays.append((player, card))
+                if not winning_card:
+                    winning = (player, card)
+                    note = ' (currently winning)'
+                else:
+                    if self.cmpcards(cards[0], winning_card, card) > 0:
+                        winning = (player, card)
+                        note = ' (currently winning)'
+                log.debug("  %s plays %s%s" % (player.seat['name'], card.tag, note))
+                player = player.next()
+
+            winning_hand = winning[0]
+            winning_card = winning[1]
+            self.plays += plays
+            self.tricks.append((winning_hand, cards))
+            log.debug("%s takes trick #%d with %s" %
+                      (winning_hand.seat['name'].capitalize(), len(self.tricks), winning_card.tag))
+            tricks[winning_hand.team_idx] += 1
+            player = winning_hand
+
+        log.debug("%s tricks: %d, %s tricks: %d" %
+                  (TEAMS[0]['tag'], tricks[0], TEAMS[1]['tag'], tricks[1]))
+        log.debug("%s wins deal" %
+                  (TEAMS[0]['tag'] if tricks[0] > tricks[1] else TEAMS[1]['tag']))
+        return tricks
+
+    def tabulate(self):
         """
         :return: void
         """
-        return
-        plays   = []            # [(player, card), ...]
-        player  = self.lead
-        winning = (None, None)  # (player, card)
-        while len(plays) < 4:
-            card = playing.play(player)
-            plays.append((player, card))
-            if not winning[1]:
-                winning = (player, card)
-            else:
-                winning_card = winning[1]
-                if self.cmpcard(winning_card, card) > 0:
-                    winning = (player, card)
-            player = player.next()
+        pass
 
     def dump(self, what = None):
         """
         :return: void
         """
-        log.debug("Deal #%d" % (len(self.game.deals)))
+        print("Deal #%d" % (self.deal_num))
 
         if self.dealer:
-            log.debug("  Dealer: %s" % (self.dealer['name']))
+            print("  Dealer: %s" % (self.dealer['name']))
 
         if self.hands:
-            log.debug("  Hands:")
+            print("  Hands:")
             for hand in self.hands:
-                log.debug("    %-5s (%d): %s" % (hand.seat['name'], hand.pos, [c.tag for c in hand.cards]))
-
-            log.debug("  Turncard: %s" % (self.turncard.tag))
-            log.debug("  Buried: %s" % ([c.tag for c in self.bury]))
-
-########
-# Hand #
-########
-
-class Hand(object):
-    """
-    """
-    def __init__(self, deal, seat, pos, cards):
-        self.deal        = deal
-        self.seat        = seat
-        self.pos         = pos
-        self.cards       = cards
-        self.next_pos    = (pos + 1) % 4
-        self.partner_pos = (pos + 2) % 4
-        self.prev_pos    = (pos + 3) % 4
-
-    def next(self):
-        return self.deal.hands[self.next_pos]
+                print("    %-5s (%d): %s" %
+                      (hand.seat['name'], hand.pos, [c.tag for c in hand.cards]))
+            print("  Turncard: %s" % (self.turncard.tag))
+            print("  Buried: %s" % ([c.tag for c in self.bury]))
 
 ###########
 # Testing #
 ###########
 
-debug = 1
-if debug > 0:
-    log.setLevel(logging.DEBUG)
-    log.addHandler(dbg_hand)
-
 if __name__ == '__main__':
+    if param.get('debug'):
+        log.setLevel(logging.DEBUG)
+        log.addHandler(dbg_hand)
+
+    seed   = None
+    ndeals = 1
+    # Usage: euchre.py [<seed> [<ndeals>}]
+    prog   = sys.argv.pop(0)
+    try:
+        seed   = int(sys.argv.pop(0))
+        ndeals = int(sys.argv.pop(0))
+    except IndexError:
+        pass
+
+    if seed:
+        random.seed(seed)
+
     g = MATCH.newgame()
-    for i in range(0, 4):
+    for i in range(0, ndeals):
         d = g.newdeal()
         d.play()
