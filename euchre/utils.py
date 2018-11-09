@@ -1,10 +1,13 @@
 # -*- coding: utf-8 -*-
 
 import logging
+import json
+import re
+
 import yaml
 
 #####################
-# config management #
+# Config Management #
 #####################
 
 class Config(object):
@@ -74,3 +77,19 @@ class MyLogger(logging.getLoggerClass()):
             self._log(NOTICE, msg, args, **kwargs)
 
 logging.setLoggerClass(MyLogger)
+
+########
+# Misc #
+########
+
+def prettyprint(data, indent = 4, sort_keys = True, noprint = False):
+    """Nicer version of pprint (which is actually kind of ugly)
+
+    Note: assumes that input data can be dumped to json (typically a list or dict)
+    """
+    pattern = re.compile(r'^', re.MULTILINE)
+    spaces = ' ' * indent
+    if noprint:
+        return re.sub(pattern, spaces, json.dumps(data, indent=indent, sort_keys=sort_keys))
+    else:
+        print(re.sub(pattern, spaces, json.dumps(data, indent=indent, sort_keys=sort_keys)))

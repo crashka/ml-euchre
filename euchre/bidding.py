@@ -13,7 +13,9 @@ def bid(hand):
     bid_rnd = len(deal.bids) // 4 + 1
 
     if bid_rnd == 1:
+        hand.analyze()
         turnsuit = deal.turncard.suit
+        hand.analysis(turnsuit)
         # TEMP: random for now (pass 87.5% of the time)!!!
         return random.choice([turnsuit] + [None] * 7)
     elif bid_rnd == 2:

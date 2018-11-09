@@ -10,9 +10,9 @@ import random
 
 from utils import Config
 
-############################
-# config/environment stuff #
-############################
+######################
+# Config/Environment #
+######################
 
 FILE_DIR      = os.path.dirname(os.path.realpath(__file__))
 BASE_DIR      = os.path.realpath(os.path.join(FILE_DIR, os.pardir))
@@ -26,7 +26,7 @@ env_param     = {'EUCHRE_DEBUG': 'debug'}
 param.update({v: environ[k] for k, v in env_param.items() if k in environ})
 
 ###########
-# logging #
+# Logging #
 ###########
 
 # create logger (TODO: logging parameters belong in config file as well!!!)
@@ -50,6 +50,13 @@ log = logging.getLogger(LOGGER_NAME)
 log.setLevel(logging.INFO)
 log.addHandler(dflt_hand)
 
+##############
+# Exceptions #
+##############
+
+class LogicError(Exception):
+    pass
+
 ##################
 # Basedata Setup #
 ##################
@@ -57,14 +64,14 @@ log.addHandler(dflt_hand)
 # LATER: only use configured value if debug/dev mode!!!
 random.seed(param.get('random_seed'))
 
-def validate_basedata(basedata):
+def validate_basedata(basedata, offset = 0):
     """Make sure that the embedded index for base data elements matches the position
     within the data structure
 
     :return: void (failed assert on validation error)
     """
     for elem in basedata:
-        assert elem['idx'] == basedata.index(elem)
+        assert elem['idx'] == basedata.index(elem) + offset
 
 ##############
 # Base Cards #
@@ -107,6 +114,12 @@ ace      = {'idx': 5, 'name': 'ace',   'tag': 'A'}
 
 RANKS    = [nine, ten, jack, queen, king, ace]
 
+left     = {'idx': 6, 'name': 'left',  'tag': 'L'}
+right    = {'idx': 7, 'name': 'right', 'tag': 'R'}
+
+BOWERS   = [left, right]
+ALLRANKS = RANKS + BOWERS
+
 clubs    = {'idx': 0, 'name': 'clubs',    'tag': '\u2663'}
 diamonds = {'idx': 1, 'name': 'diamonds', 'tag': '\u2666'}
 hearts   = {'idx': 2, 'name': 'hearts',   'tag': '\u2665'}
@@ -118,17 +131,19 @@ CARDS = []
 for idx in range(0, 24):
     rank = RANKS[idx // 4]
     suit = SUITS[idx % 4]
-    card = {'idx'  : idx,
-            'rank' : rank,
-            'suit' : suit,
-            'name' : "%s of %s" % (rank['name'].capitalize(),
-                                   suit['name'].capitalize()),
-            'tag'  : "%s%s" % (rank['tag'], suit['tag']),
-            'level': rank['idx'] + 1
+    card = {'idx'    : idx,
+            'rank'   : rank,
+            'suit'   : suit,
+            'name'   : "%s of %s" % (rank['name'].capitalize(),
+                                     suit['name'].capitalize()),
+            'tag'    : "%s%s" % (rank['tag'], suit['tag']),
+            'level'  : rank['idx'] + 1,
+            'sortkey': suit['idx'] * len(ALLRANKS) + rank['idx']
     }
     CARDS.append(card)
 
 validate_basedata(RANKS)
+validate_basedata(BOWERS, len(RANKS))
 validate_basedata(SUITS)
 validate_basedata(CARDS)
 

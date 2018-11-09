@@ -118,7 +118,7 @@ class Deal(object):
         self.tricks   = None  # [(winner_hand, [cards]), ...]
 
     @property
-    def deal_num(self):
+    def dealno(self):
         """Only valid for current deal within game
         """
         assert self.game.curdeal == self
@@ -129,7 +129,7 @@ class Deal(object):
         :return: void
         """
         # shuffle and deal
-        log.debug("Deal #%d: dealer is %s" % (self.deal_num, self.dealer['name']))
+        log.debug("Deal #%d: dealer is %s" % (self.dealno, self.dealer['name']))
         self.shuffle()
         self.deal()
 
@@ -180,7 +180,7 @@ class Deal(object):
         """
         :return: suit (trunp) or None (meaning passed deal)
         """
-        log.debug("Bidding for deal #%d begins" % (self.deal_num))
+        log.debug("Bidding for deal #%d begins" % (self.dealno))
         bidder = self.hands[0]
         while len(self.bids) < 8:
             bid = bidding.bid(bidder)
@@ -191,7 +191,10 @@ class Deal(object):
             if bid:
                 log.debug("  %s calls %s" % (bidder.seat['name'], bid['name']))
                 break
-            log.debug("  %s passes" % (bidder.seat['name']))
+            elif len(self.bids) == 4:
+                log.debug("  %s passes, turns down %s" % (bidder.seat['name'], self.turncard.tag))
+            else:
+                log.debug("  %s passes" % (bidder.seat['name']))
             bidder = bidder.next()
 
         if bid:
@@ -235,6 +238,7 @@ class Deal(object):
             plays   = []            # [(player_hand, card), ...]
             cards   = []            # [cards]
             winning = (None, None)  # (player_hand, card)
+            trickno = len(self.tricks) + 1
             while len(plays) < 4:
                 note = ''
                 winning_hand = winning[0]
@@ -249,22 +253,29 @@ class Deal(object):
                     if self.cmpcards(cards[0], winning_card, card) > 0:
                         winning = (player, card)
                         note = ' (currently winning)'
-                log.debug("  %s plays %s%s" % (player.seat['name'], card.tag, note))
+                if len(plays) == 1:
+                    log.debug("Trick #%d:" % (trickno))
+                    log.debug("  %s leads %s%s" % (player.seat['name'], card.tag, note))
+                else:
+                    log.debug("  %s plays %s%s" % (player.seat['name'], card.tag, note))
                 player = player.next()
 
             winning_hand = winning[0]
             winning_card = winning[1]
             self.plays += plays
             self.tricks.append((winning_hand, cards))
-            log.debug("%s takes trick #%d with %s" %
-                      (winning_hand.seat['name'].capitalize(), len(self.tricks), winning_card.tag))
-            tricks[winning_hand.team_idx] += 1
+            team_idx = winning_hand.team_idx
+            tricks[team_idx] += 1
+            log.debug("%s takes trick #%d with %s (%d-%d)" %
+                      (winning_hand.seat['name'].capitalize(), trickno, winning_card.tag,
+                       tricks[team_idx], tricks[team_idx ^ 0x1]))
             player = winning_hand
 
         log.debug("%s tricks: %d, %s tricks: %d" %
                   (TEAMS[0]['tag'], tricks[0], TEAMS[1]['tag'], tricks[1]))
-        log.debug("%s wins deal" %
-                  (TEAMS[0]['tag'] if tricks[0] > tricks[1] else TEAMS[1]['tag']))
+        log.debug("%s wins deal #%d" %
+                  ((TEAMS[0]['name'] if tricks[0] > tricks[1] else TEAMS[1]['name']).title(),
+                   self.dealno))
         return tricks
 
     def tabulate(self):
@@ -277,7 +288,7 @@ class Deal(object):
         """
         :return: void
         """
-        print("Deal #%d" % (self.deal_num))
+        print("Deal #%d" % (self.dealno))
 
         if self.dealer:
             print("  Dealer: %s" % (self.dealer['name']))
@@ -294,21 +305,7 @@ class Deal(object):
 # Testing #
 ###########
 
-if __name__ == '__main__':
-    if param.get('debug'):
-        log.setLevel(logging.DEBUG)
-        log.addHandler(dbg_hand)
-
-    seed   = None
-    ndeals = 1
-    # Usage: euchre.py [<seed> [<ndeals>}]
-    prog   = sys.argv.pop(0)
-    try:
-        seed   = int(sys.argv.pop(0))
-        ndeals = int(sys.argv.pop(0))
-    except IndexError:
-        pass
-
+def test(seed = None, ndeals = 1):
     if seed:
         random.seed(seed)
 
@@ -316,3 +313,12 @@ if __name__ == '__main__':
     for i in range(0, ndeals):
         d = g.newdeal()
         d.play()
+
+if __name__ == '__main__':
+    if param.get('debug'):
+        log.setLevel(logging.DEBUG)
+        log.addHandler(dbg_hand)
+
+    # Usage: euchre.py [<seed> [<ndeals>}]
+    prog = sys.argv.pop(0)
+    test(*sys.argv)
