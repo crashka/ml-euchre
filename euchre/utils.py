@@ -90,6 +90,6 @@ def prettyprint(data, indent = 4, sort_keys = True, noprint = False):
     pattern = re.compile(r'^', re.MULTILINE)
     spaces = ' ' * indent
     if noprint:
-        return re.sub(pattern, spaces, json.dumps(data, indent=indent, sort_keys=sort_keys))
+        return re.sub(pattern, spaces, json.dumps(data, indent=indent, sort_keys=sort_keys, ensure_ascii=False))
     else:
-        print(re.sub(pattern, spaces, json.dumps(data, indent=indent, sort_keys=sort_keys)))
+        print(re.sub(pattern, spaces, json.dumps(data, indent=indent, sort_keys=sort_keys, ensure_ascii=False)))

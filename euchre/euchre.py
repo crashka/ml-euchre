@@ -268,7 +268,7 @@ class Deal(object):
             tricks[team_idx] += 1
             log.debug("%s takes trick #%d with %s (%d-%d)" %
                       (winning_hand.seat['name'].capitalize(), trickno, winning_card.tag,
-                       tricks[team_idx], tricks[team_idx ^ 0x1]))
+                       tricks[team_idx], tricks[team_idx ^ 0x01]))
             player = winning_hand
 
         log.debug("%s tricks: %d, %s tricks: %d" %

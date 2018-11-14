@@ -22,7 +22,7 @@ CONFIG_PATH   = os.path.join(BASE_DIR, CONFIG_DIR, CONFIG_FILE)
 cfg           = Config(CONFIG_PATH)
 
 param         = cfg.config('params')
-env_param     = {'EUCHRE_DEBUG': 'debug'}
+env_param     = {'EUCHREDEBUG': 'debug'}
 param.update({v: environ[k] for k, v in env_param.items() if k in environ})
 
 ###########
@@ -138,7 +138,7 @@ for idx in range(0, 24):
                                      suit['name'].capitalize()),
             'tag'    : "%s%s" % (rank['tag'], suit['tag']),
             'level'  : rank['idx'] + 1,
-            'sortkey': suit['idx'] * len(ALLRANKS) + rank['idx']
+            'sortkey': suit['idx'] * len(ALLRANKS) + rank['idx'] + 1
     }
     CARDS.append(card)
 
