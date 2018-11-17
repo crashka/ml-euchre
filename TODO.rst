@@ -10,6 +10,7 @@ To Do
 * output ML data stream (include max hand_score seen)
 * classes for play rules/strategy
 * config for bidding/playing classes should be by team
+* decouple bidding algorithm/class from scoring formula(s) (i.e. scoring is parameterized)
 
 
 -----

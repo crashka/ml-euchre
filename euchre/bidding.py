@@ -11,13 +11,12 @@ def bid(hand):
     """
     deal = hand.deal
     bid_rnd = len(deal.bids) // 4 + 1
+    hand.analyze(deal.turncard)
+    turnsuit = deal.turncard.suit
 
     if bid_rnd == 1:
-        hand.analyze(deal.turncard)
-        turnsuit = deal.turncard.suit
-        hand.trumpanalysis(turnsuit)
-        # TEMP: random for now (pass 87.5% of the time)!!!
-        return random.choice([turnsuit] + [None] * 7)
+        hand.trumpanalysis(turnsuit)  # no-op (just prints debugging info)
+        return turnsuit if hand.biddable(turnsuit, 1) else None
     elif bid_rnd == 2:
-        # TEMP: random for now (pass 66.7% of the time)!!!
-        return random.choice(SUITS + [None] * 8)
+        bestsuit = hand.bestsuit(turnsuit)
+        return bestsuit if hand.biddable(bestsuit, 2) else None

@@ -65,6 +65,8 @@ class Card(object):
 # a trump suit card value!!!
 OFF_ACE_VALUE   = queen['level']
 VOID_SUIT_VALUE = queen['level']
+BID_THRESHOLD   = right['level'] + left['level'] + OFF_ACE_VALUE
+DEALER_VALUE    = queen['level']
 
 class HAnalysis(object):
     """
@@ -96,6 +98,13 @@ class HAnalysis(object):
         self.aces          = [0] * 4     # only count off-aces
         self.voids         = [None] * 4  # only count non-trump suits
         self.singletons    = [None] * 4  # only count non-trump suits
+        # note that hand_score should not be used as part of the bidding (or playing)
+        # logic; rather, the highest hand_score "seen" thus far in the bidding round
+        # is used as a rough proxy for how likely the bid would have actually gotten
+        # to a hand position--this should be the only place in the program that we are
+        # allowed to use a god view as part of the game strategy (LATER, we can extend
+        # this idea to take into account various bidding/playing styles in determining
+        # the likeliness of a bidding opportunity)
         self.hand_score    = [0] * 4
 
     def log_debug(self):
@@ -190,24 +199,27 @@ class Hand(object):
         # final pass (aggregation)
         for trump in SUITS:
             tru_idx = trump['idx']
-            count = hand_anl.suitcount[tru_idx].copy()
-            del count[tru_idx]  # only count off-suits
-            hand_anl.voids[tru_idx]      = len([c for c in count if c == 0])
-            hand_anl.singletons[tru_idx] = len([c for c in count if c == 1])
-
-            # TODO: resort suitcards to include bower rankings!!!
-
-            # REVISIT: swap green and purple based on score1 (or score2???)!!!
-            if hand_anl.purple_score1[tru_idx] > hand_anl.green_score1[tru_idx]:
-                hand_anl.green_score1[tru_idx], hand_anl.purple_score1[tru_idx] = \
-                    hand_anl.purple_score1[tru_idx], hand_anl.green_score1[tru_idx]
-                hand_anl.green_score2[tru_idx], hand_anl.purple_score2[tru_idx] = \
-                    hand_anl.purple_score2[tru_idx], hand_anl.green_score2[tru_idx]
 
             if self.pos == 3:
                 # note that this may return the turncard, e.g. if it would be the
                 # lowest trump (or perhaps some wacky other reason)
                 hand_anl.discard[tru_idx] = self.bestdiscard(trump, turncard)
+
+            count = hand_anl.suitcount[tru_idx].copy()
+            del count[tru_idx]  # only count off-suits
+            hand_anl.voids[tru_idx]      = len([c for c in count if c == 0])
+            hand_anl.singletons[tru_idx] = len([c for c in count if c == 1])
+
+            # re-sort suitcards to include bower rankings (TODO: make this less ugly!!!)
+            hand_anl.suitcards[tru_idx][tru_idx].sort(key=lambda c: c.analysis.score1[tru_idx])
+
+            # REVISIT: currently swap green and purple scores based on score1, but
+            # should it be something else (e.g. score2)???
+            if hand_anl.purple_score1[tru_idx] > hand_anl.green_score1[tru_idx]:
+                hand_anl.green_score1[tru_idx], hand_anl.purple_score1[tru_idx] = \
+                    hand_anl.purple_score1[tru_idx], hand_anl.green_score1[tru_idx]
+                hand_anl.green_score2[tru_idx], hand_anl.purple_score2[tru_idx] = \
+                    hand_anl.purple_score2[tru_idx], hand_anl.green_score2[tru_idx]
 
             # TODO: hand score should take into account the turn card--penalty/reward
             # for deliverying the trump into opponent or partner hand, or included in
@@ -298,14 +310,10 @@ class Hand(object):
 
     def trumpanalysis(self, trump):
         """
-        :param trump: either suit or idx
+        :param trump: dict
         :return: dict with analysis info
         """
-        if isinstance(trump, dict):
-            idx = trump['idx']
-        else:
-            idx = trump
-            trump = SUITS[idx]
+        idx = trump['idx']
         hand_anl = self.analysis
         info = {'suitcount':  hand_anl.suitcount[idx],
                 'suitcards':  hand_anl.suitcards[idx],
@@ -330,6 +338,31 @@ class Hand(object):
                   (trump['tag'], [c.tag for c in self.cards],
                    pp(info_debug, sort_keys=False, noprint=True)))
         return info
+
+    def bestsuit(self, exclude = None):
+        """
+        :return: suit (dict)
+        """
+        suits = SUITS.copy()
+        if exclude:
+            del suits[exclude['idx']]
+        return max(suits, key=lambda s: self.analysis.hand_score[s['idx']])
+
+    def biddable(self, trump, round):
+        """
+        TEMP TEMP TEMP: this is just a stand-in for dev purposes!!!!!!!
+        :param trump: dict
+        :param round: int
+        :return: bool
+        """
+        idx = trump['idx']
+        thresh = BID_THRESHOLD
+        if self.pos == 3 and round == 1:
+            # NOTE: this is currently not built into hand_score
+            thresh -= DEALER_VALUE
+        elif round == 2:
+            thresh -= self.pos  # or whatever...
+        return self.analysis.hand_score[idx] > thresh
 
 ###########
 # Testing #
