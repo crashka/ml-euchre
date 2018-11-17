@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from core import log, TEAMS, SUITS, ace, jack, right, left, LogicError
+from core import log, TEAMS, SUITS, ace, king, queen, jack, right, left, LogicError
 from utils import prettyprint as pp
 
 ########
@@ -41,25 +41,30 @@ class Card(object):
         if self.analysis and not reanalyze:
             return self.analysis
 
-        card_anl    = CAnalysis(self)
-        suit_idx    = self.suit['idx']
-        next_idx    = suit_idx ^ 0x3
+        card_anl = CAnalysis(self)
+        suit_idx = self.suit['idx']
+        next_idx = suit_idx ^ 0x3
         card_anl.score1 = [self.level] * 4
         card_anl.score2 = [self.level * self.level] * 4
         if self.rank == jack:
-            card_anl.score1[suit_idx] = right['idx'] + 1
+            card_anl.score1[suit_idx] = right['level']
             card_anl.score2[suit_idx] = card_anl.score1[suit_idx] * card_anl.score1[suit_idx]
-            card_anl.score1[next_idx] = left['idx'] + 1
+            card_anl.score1[next_idx] = left['level']
             card_anl.score2[next_idx] = card_anl.score1[next_idx] * card_anl.score1[next_idx]
-        log.debug("Analyzing card %s" % (self.tag))
-        log.debug("  score1: %s" % (card_anl.score1))
-        log.debug("  score2: %s" % (card_anl.score2))
+        log.trace("Analyzing card %s" % (self.tag))
+        log.trace("  score1: %s" % (card_anl.score1))
+        log.trace("  score2: %s" % (card_anl.score2))
         self.analysis = card_anl
         return self.analysis
 
 ########
 # Hand #
 ########
+
+# TEMP: for now, hardwire value for off-suit aces and voids, as equated with
+# a trump suit card value!!!
+OFF_ACE_VALUE   = queen['level']
+VOID_SUIT_VALUE = queen['level']
 
 class HAnalysis(object):
     """
@@ -91,8 +96,9 @@ class HAnalysis(object):
         self.aces          = [0] * 4     # only count off-aces
         self.voids         = [None] * 4  # only count non-trump suits
         self.singletons    = [None] * 4  # only count non-trump suits
+        self.hand_score    = [0] * 4
 
-    def logdebug(self):
+    def log_debug(self):
         log.debug("Analyzing hand for %s"   % (self.parent.seat['name']))
         log.debug("  cards by suit: %s"     % (self.count))
         log.debug("  trump score:   %s, %s" % (self.trump_score1, self.trump_score2))
@@ -103,6 +109,9 @@ class HAnalysis(object):
         log.debug("  aces:          %s"     % (self.aces))
         log.debug("  voids:         %s"     % (self.voids))
         log.debug("  singletons:    %s"     % (self.singletons))
+        log.debug("  hand score:    %s"     % (self.hand_score))
+        if self.discard[0]:
+            log.debug("  discard:       %s"     % ([str(c) for c in self.discard]))
 
 class Hand(object):
     """
@@ -132,21 +141,14 @@ class Hand(object):
     def next(self):
         return self.deal.hands[self.next_pos]
 
-    def analyze(self, reanalyze = False):
+    def analyze(self, turncard, reanalyze = False):
         """
-        TODO: special logic for dealer (pos = 3)!!!
-          Discard logic:
-            - Hold onto trump
-            - Create void if possible
-                - Choose next or green, depending on opponent tendencies (later)
-            - Hold onto (or create) doubletons (favor over singletons)
-            - Discard next if loner call from third seat
-            - Discard lowest ranked card (last resort)
         """
         if self.analysis and not reanalyze:
             return self.analysis
 
-        hand_anl = HAnalysis(self)
+        self.analysis = HAnalysis(self)
+        hand_anl = self.analysis
         for card in self.cards:
             suit_idx = card.suit['idx']
             is_bower = card.rank == jack
@@ -193,6 +195,8 @@ class Hand(object):
             hand_anl.voids[tru_idx]      = len([c for c in count if c == 0])
             hand_anl.singletons[tru_idx] = len([c for c in count if c == 1])
 
+            # TODO: resort suitcards to include bower rankings!!!
+
             # REVISIT: swap green and purple based on score1 (or score2???)!!!
             if hand_anl.purple_score1[tru_idx] > hand_anl.green_score1[tru_idx]:
                 hand_anl.green_score1[tru_idx], hand_anl.purple_score1[tru_idx] = \
@@ -200,14 +204,97 @@ class Hand(object):
                 hand_anl.green_score2[tru_idx], hand_anl.purple_score2[tru_idx] = \
                     hand_anl.purple_score2[tru_idx], hand_anl.green_score2[tru_idx]
 
-        # overall score for hand based on the following (dependent on trump):
-        #   - trump score
-        #   - trumps
-        #   - voids
-        #   - aces
+            if self.pos == 3:
+                # note that this may return the turncard, e.g. if it would be the
+                # lowest trump (or perhaps some wacky other reason)
+                hand_anl.discard[tru_idx] = self.bestdiscard(trump, turncard)
 
-        hand_anl.logdebug()
-        self.analysis = hand_anl
+            # TODO: hand score should take into account the turn card--penalty/reward
+            # for deliverying the trump into opponent or partner hand, or included in
+            # the computation for dealer hand (related to selecting discard, above)!!!
+            hand_anl.hand_score[tru_idx] = hand_anl.trump_score1[tru_idx] + \
+                                           hand_anl.trumps[tru_idx] + \
+                                           hand_anl.voids[tru_idx] * VOID_SUIT_VALUE + \
+                                           hand_anl.aces[tru_idx] * OFF_ACE_VALUE
+
+        hand_anl.log_debug()
+
+    def bestdiscard(self, trump, turncard):
+        """
+        """
+        hand_anl = self.analysis
+        tru_idx = trump['idx']
+        nxt_idx = tru_idx ^ 0x03
+        suitcount = hand_anl.suitcount[tru_idx]
+        suitcards = hand_anl.suitcards[tru_idx]
+
+        # Handle all trump case (get it out of the way)
+        if suitcount[tru_idx] == len(self.cards):
+            discard = min(suitcards[tru_idx][0], turncard, key=lambda c: c.level)
+            log.debug("Discard %s if %s trump, lowest trump" % (discard.tag, trump['tag']))
+            return discard
+
+        # Create void if possible
+        if suitcount.count(1) > 0:
+            mincard = None
+            minlevel = 10
+            for idx in range(0, len(suitcount)):
+                if idx == tru_idx or suitcount[idx] != 1:
+                    continue
+                # for now, we just pick the first card found at the lowest level
+                # LATER: favor voiding next or green, depending on opponent tendencies
+                # (always void next if loner called from pos = 2)!!!
+                if suitcards[idx][0].level < minlevel and suitcards[idx][0].rank != ace:
+                    mincard = suitcards[idx][0]
+                    minlevel = mincard.level
+            if mincard:
+                log.debug("Discard %s if %s trump, voiding suit" % (mincard.tag, trump['tag']))
+                return mincard
+
+        # Create doubletons, if possible (favor over creating singletons)
+        if suitcount.count(3) > 0:
+            idx = suitcount.index(3)
+            # REVISIT: perhaps only do if high card in suit is actually viable (like
+            # queen or higher)!!!
+            if idx != tru_idx:
+                # note that first element is the loweest (cards sorted ascending)
+                discard = suitcards[idx][0]
+                log.debug("Discard %s if %s trump, creating doubleton" % (discard.tag, trump['tag']))
+                return discard
+
+        # Discard next if loner call from third seat (REVISIT: not sure it makes sense
+        # to extend this to the general, non-voiding, non-third-seat-loner case!!!)
+        if suitcount[nxt_idx] == 2:
+            # don't unguard doubleton king or break up A-K
+            if king not in (c.rank for c in suitcards[nxt_idx]):
+                discard = suitcards[nxt_idx][0]
+                log.debug("Discard %s if %s trump, reducing next" % (discard.tag, trump['tag']))
+                return discard
+
+        # Discard lowest card, any suit (last resort)
+        mincard = None
+        minlevel = 10
+        savecards = []  # attempt to preserve, only discard if no alternatives
+        for idx in range(0, len(suitcards)):
+            if idx == tru_idx:
+                continue
+            # avoid unguarding doubleton king, while making sure that A-K doubleton
+            # takes precedence (if also present)
+            if suitcount[idx] == 2 and king in (c.rank for c in suitcards[idx]):
+                savecards.append(suitcards[idx][0])
+                continue
+            # otherwise we just pick the first card found at the lowest level; chances
+            # are that there is no other meaninful logic to apply here (e.g. choosing
+            # between green suit doubletons)
+            if suitcards[idx] and suitcards[idx][0].level < minlevel:
+                mincard = suitcards[idx][0]
+                minlevel = mincard.level
+        assert mincard or savecards
+        if not mincard:
+            mincard = min(savecards, key=lambda c: c.level)
+            log.debug("Have to unguard doubleton king or discard from A-K, oh well...")
+        log.debug("Discard %s if %s trump, lowest card" % (mincard.tag, trump['tag']))
+        return mincard
 
     def trumpanalysis(self, trump):
         """
@@ -233,11 +320,14 @@ class Hand(object):
                 'trumps'    : hand_anl.trumps[idx],
                 'aces'      : hand_anl.aces[idx],
                 'voids'     : hand_anl.voids[idx],
-                'singletons': hand_anl.singletons[idx]}
+                'singletons': hand_anl.singletons[idx],
+                'hand_score': hand_anl.hand_score[idx]}
         info_debug = info.copy()
         info_debug.update({'suitcards': [[c.tag for c in s] for s in hand_anl.suitcards[idx]]})
+        if self.pos == 3:
+            info_debug.update({'discard': hand_anl.discard[idx].tag})
         log.debug("%s trump analysis for %s:\n%s" %
-                  (trump['name'].capitalize(), [c.tag for c in self.cards],
+                  (trump['tag'], [c.tag for c in self.cards],
                    pp(info_debug, sort_keys=False, noprint=True)))
         return info
 

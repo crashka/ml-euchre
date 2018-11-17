@@ -7,7 +7,7 @@ import logging
 import logging.handlers
 import random
 
-from core import param, log, dbg_hand, RANKS, SUITS, CARDS, SEATS, TEAMS
+from core import param, log, dbg_hand, RANKS, SUITS, CARDS, SEATS, TEAMS, LogicError
 from hand import Card, Hand
 import bidding
 import playing
@@ -129,7 +129,7 @@ class Deal(object):
         :return: void
         """
         # shuffle and deal
-        log.debug("Deal #%d: dealer is %s" % (self.dealno, self.dealer['name']))
+        log.info("Deal #%d: dealer is %s" % (self.dealno, self.dealer['name']))
         self.shuffle()
         self.deal()
 
@@ -145,7 +145,7 @@ class Deal(object):
         :return: void
         """
         if self.deck and not force:
-            raise RuntimeError("Cannot shuffle if deck is already shuffled")
+            raise LogicError("Cannot shuffle if deck is already shuffled")
         self.deck = [Card(c) for c in random.sample(CARDS, k=len(CARDS))]
 
     def deal(self, force = False):
@@ -153,11 +153,11 @@ class Deal(object):
         :return: void
         """
         if self.hands and not force:
-            raise RuntimeError("Cannot deal when hands have been dealt")
+            raise LogicError("Cannot deal when hands have been dealt")
         if not self.deck:
-            raise RuntimeError("Deck must be shuffled in order to deal")
+            raise LogicError("Deck must be shuffled in order to deal")
         if not self.dealer:
-            raise RuntimeError("Dealer must be set in order to deal")
+            raise LogicError("Dealer must be set in order to deal")
 
         cardno  = 0
         self.hands = []
@@ -180,7 +180,7 @@ class Deal(object):
         """
         :return: suit (trunp) or None (meaning passed deal)
         """
-        log.debug("Bidding for deal #%d begins" % (self.dealno))
+        log.info("Bidding for deal #%d begins" % (self.dealno))
         bidder = self.hands[0]
         while len(self.bids) < 8:
             bid = bidding.bid(bidder)
@@ -189,12 +189,12 @@ class Deal(object):
             # a structure containing insight into bid decision, so we would have to check
             # for a pass within it explicitly!!!
             if bid:
-                log.debug("  %s calls %s" % (bidder.seat['name'], bid['name']))
+                log.info("  %s calls %s" % (bidder.seat['name'], bid['name']))
                 break
             elif len(self.bids) == 4:
-                log.debug("  %s passes, turns down %s" % (bidder.seat['name'], self.turncard.tag))
+                log.info("  %s passes, turns down %s" % (bidder.seat['name'], self.turncard.tag))
             else:
-                log.debug("  %s passes" % (bidder.seat['name']))
+                log.info("  %s passes" % (bidder.seat['name']))
             bidder = bidder.next()
 
         if bid:
@@ -202,10 +202,10 @@ class Deal(object):
             self.contract = bid
             self.plays    = []  # [(player_hand, card), ...]
             self.tricks   = []  # [(winner_hand, [cards]), ...]
-            log.debug("%s is trump, called by %s" %
-                      (bid['name'].capitalize(), TEAMS[bidder.team_idx]['tag']))
+            log.info("%s is trump, called by %s" %
+                     (bid['name'].capitalize(), TEAMS[bidder.team_idx]['tag']))
         else:
-            log.debug("Deal is passed")
+            log.info("Deal is passed")
 
         return bid  # see REVISIT above on interpretation of bid
 
@@ -217,12 +217,12 @@ class Deal(object):
         :return: int (negative if played loses, positive if played wins)
         """
         ret = None
-        winning_trump = winning.suit == self.contract
-        played_trump  = played.suit == self.contract
+        trump_winning = winning.suit == self.contract
+        trump_played  = played.suit == self.contract
         followed_suit = played.suit == lead.suit
-        if winning_trump:
-            ret = played.level - winning.level if played_trump else -played.level
-        elif played_trump:
+        if trump_winning:
+            ret = played.level - winning.level if trump_played else -played.level
+        elif trump_played:
             ret = played.level
         else:
             ret = played.level - winning.level if followed_suit else -played.level
@@ -241,8 +241,7 @@ class Deal(object):
             trickno = len(self.tricks) + 1
             while len(plays) < 4:
                 note = ''
-                winning_hand = winning[0]
-                winning_card = winning[1]
+                winning_card = winning[1]  # just for semantic readability
                 card = playing.play(player)
                 cards.append(card)
                 plays.append((player, card))
@@ -254,28 +253,28 @@ class Deal(object):
                         winning = (player, card)
                         note = ' (currently winning)'
                 if len(plays) == 1:
-                    log.debug("Trick #%d:" % (trickno))
-                    log.debug("  %s leads %s%s" % (player.seat['name'], card.tag, note))
+                    log.info("Trick #%d:" % (trickno))
+                    log.info("  %s leads %s%s" % (player.seat['name'], card.tag, note))
                 else:
-                    log.debug("  %s plays %s%s" % (player.seat['name'], card.tag, note))
+                    log.info("  %s plays %s%s" % (player.seat['name'], card.tag, note))
                 player = player.next()
 
-            winning_hand = winning[0]
+            winning_hand = winning[0]  # for readability (as above)
             winning_card = winning[1]
             self.plays += plays
             self.tricks.append((winning_hand, cards))
             team_idx = winning_hand.team_idx
             tricks[team_idx] += 1
-            log.debug("%s takes trick #%d with %s (%d-%d)" %
-                      (winning_hand.seat['name'].capitalize(), trickno, winning_card.tag,
-                       tricks[team_idx], tricks[team_idx ^ 0x01]))
+            log.info("%s takes trick #%d with %s (%d-%d)" %
+                     (winning_hand.seat['name'].capitalize(), trickno, winning_card.tag,
+                      tricks[team_idx], tricks[team_idx ^ 0x01]))
             player = winning_hand
 
-        log.debug("%s tricks: %d, %s tricks: %d" %
-                  (TEAMS[0]['tag'], tricks[0], TEAMS[1]['tag'], tricks[1]))
-        log.debug("%s wins deal #%d" %
-                  ((TEAMS[0]['name'] if tricks[0] > tricks[1] else TEAMS[1]['name']).title(),
-                   self.dealno))
+        log.info("%s tricks: %d, %s tricks: %d" %
+                 (TEAMS[0]['tag'], tricks[0], TEAMS[1]['tag'], tricks[1]))
+        log.info("%s wins deal #%d" %
+                 ((TEAMS[0]['name'] if tricks[0] > tricks[1] else TEAMS[1]['name']).title(),
+                  self.dealno))
         return tricks
 
     def tabulate(self):

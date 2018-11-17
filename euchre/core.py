@@ -105,17 +105,17 @@ Rank
     card // 4
 """
 
-nine     = {'idx': 0, 'name': 'nine',  'tag': '9'}
-ten      = {'idx': 1, 'name': 'ten',   'tag': '10'}
-jack     = {'idx': 2, 'name': 'jack',  'tag': 'J'}
-queen    = {'idx': 3, 'name': 'queen', 'tag': 'Q'}
-king     = {'idx': 4, 'name': 'king',  'tag': 'K'}
-ace      = {'idx': 5, 'name': 'ace',   'tag': 'A'}
+nine     = {'idx': 0, 'name': 'nine',  'level': 1, 'tag': '9'}
+ten      = {'idx': 1, 'name': 'ten',   'level': 2, 'tag': '10'}
+jack     = {'idx': 2, 'name': 'jack',  'level': 3, 'tag': 'J'}
+queen    = {'idx': 3, 'name': 'queen', 'level': 4, 'tag': 'Q'}
+king     = {'idx': 4, 'name': 'king',  'level': 5, 'tag': 'K'}
+ace      = {'idx': 5, 'name': 'ace',   'level': 6, 'tag': 'A'}
 
 RANKS    = [nine, ten, jack, queen, king, ace]
 
-left     = {'idx': 6, 'name': 'left',  'tag': 'L'}
-right    = {'idx': 7, 'name': 'right', 'tag': 'R'}
+left     = {'idx': 6, 'name': 'left',  'level': 7, 'tag': 'L'}
+right    = {'idx': 7, 'name': 'right', 'level': 8, 'tag': 'R'}
 
 BOWERS   = [left, right]
 ALLRANKS = RANKS + BOWERS
@@ -137,7 +137,7 @@ for idx in range(0, 24):
             'name'   : "%s of %s" % (rank['name'].capitalize(),
                                      suit['name'].capitalize()),
             'tag'    : "%s%s" % (rank['tag'], suit['tag']),
-            'level'  : rank['idx'] + 1,
+            'level'  : rank['level'],
             'sortkey': suit['idx'] * len(ALLRANKS) + rank['idx'] + 1
     }
     CARDS.append(card)

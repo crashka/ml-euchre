@@ -55,7 +55,7 @@ class Config(object):
 # from https://stackoverflow.com/questions/2183233/
 
 TRACE = logging.DEBUG - 5
-NOTICE = logging.WARNING + 5  # perhaps rename to "NOTICE"
+NOTICE = logging.WARNING + 5
 
 class MyLogger(logging.getLoggerClass()):
     def __init__(self, name, level=logging.NOTSET):
