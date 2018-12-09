@@ -15,7 +15,9 @@ def bid(hand):
     turnsuit = deal.turncard.suit
 
     if bid_rnd == 1:
-        hand.trumpanalysis(turnsuit)  # no-op (just prints debugging info)
+        # this is a no-op, since we ignore the return value (just want to dump the
+        # analysis info to debug log)
+        hand.getanalysis(turnsuit)
         return turnsuit if hand.biddable(turnsuit, 1) else None
     elif bid_rnd == 2:
         bestsuit = hand.bestsuit(turnsuit)

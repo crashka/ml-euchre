@@ -204,6 +204,11 @@ class Deal(object):
             self.tricks   = []  # [(winner_hand, [cards]), ...]
             log.info("%s is trump, called by %s" %
                      (bid['name'].capitalize(), TEAMS[bidder.team_idx]['tag']))
+
+            for hand in self.hands:
+                if hand.pos == 3:
+                    hand.pickup(self.turncard)
+                hand.playcards = hand.analysis.suitcards[bid['idx']]
         else:
             log.info("Deal is passed")
 
@@ -242,7 +247,7 @@ class Deal(object):
             while len(plays) < 4:
                 note = ''
                 winning_card = winning[1]  # just for semantic readability
-                card = playing.play(player)
+                card = playing.play(player, plays, winning)
                 cards.append(card)
                 plays.append((player, card))
                 if not winning_card:
