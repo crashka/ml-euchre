@@ -8,22 +8,24 @@ from utils import prettyprint as pp
 # Card #
 ########
 
-class CAnalysis(object):
-    """
-    """
-    def __init__(self, card):
-        self.parent = card
-        self.score1 = None
-        self.score2 = None
-
 class Card(object):
     """Represents an instance of a card that is part of a deal; the "basecard"
     is the underlying immutable card identity (e.g. rank, suit, and name) that is
     independent of deal status, trump, etc.
     """
-    def __init__(self, basecard):
+    def __init__(self, basecard, deal):
         self.base = basecard
-        self.analysis = None
+        self.deal = deal
+        # effective level and suit are based on trump suit
+        self.efflevel = [self.base['level']] * 4
+        self.effsuit = [self.base['suit']] * 4
+
+        suit_idx = self.base['suit']['idx']
+        next_idx = suit_idx ^ 0x3
+        if self.rank == jack:
+            self.efflevel[suit_idx] = right['level']
+            self.efflevel[next_idx] = left['level']
+            self.effsuit[next_idx] = SUITS[next_idx]
 
     def __getattr__(self, key):
         try:
@@ -37,25 +39,19 @@ class Card(object):
     def __str__(self):
         return self.base['tag']
 
-    def analyze(self, reanalyze = False):
-        if self.analysis and not reanalyze:
-            return self.analysis
+    @property
+    def level(self):
+        if self.deal.contract:
+            tru_idx = self.deal.contract['idx']
+            return self.efflevel[tru_idx]
+        return self.base['level']
 
-        card_anl = CAnalysis(self)
-        suit_idx = self.suit['idx']
-        next_idx = suit_idx ^ 0x3
-        card_anl.score1 = [self.level] * 4
-        card_anl.score2 = [self.level * self.level] * 4
-        if self.rank == jack:
-            card_anl.score1[suit_idx] = right['level']
-            card_anl.score2[suit_idx] = card_anl.score1[suit_idx] * card_anl.score1[suit_idx]
-            card_anl.score1[next_idx] = left['level']
-            card_anl.score2[next_idx] = card_anl.score1[next_idx] * card_anl.score1[next_idx]
-        log.trace("Analyzing card %s" % (self.tag))
-        log.trace("  score1: %s" % (card_anl.score1))
-        log.trace("  score2: %s" % (card_anl.score2))
-        self.analysis = card_anl
-        return self.analysis
+    @property
+    def suit(self):
+        if self.deal.contract:
+            tru_idx = self.deal.contract['idx']
+            return self.effsuit[tru_idx]
+        return self.base['suit']
 
 ########
 # Hand #
@@ -68,35 +64,24 @@ VOID_SUIT_VALUE = queen['level']
 BID_THRESHOLD   = right['level'] + left['level'] + OFF_ACE_VALUE
 DEALER_VALUE    = queen['level']
 
-class HAnalysis(object):
+class HandAnaly(object):
+    """Analysis for a hand and specified trump suit
     """
-    """
-    def __init__(self, hand):
-        self.parent        = hand
-        # the following are all lists with 4 elements, representing the
-        # value given each of the possible trump suits
-        self.suitcount     = [list((0, 0, 0, 0))]
-        self.suitcount.append(list((0, 0, 0, 0)))
-        self.suitcount.append(list((0, 0, 0, 0)))
-        self.suitcount.append(list((0, 0, 0, 0)))
-        self.suitcards     = [list(([], [], [], []))]
-        self.suitcards.append(list(([], [], [], [])))
-        self.suitcards.append(list(([], [], [], [])))
-        self.suitcards.append(list(([], [], [], [])))
-        self.discard       = [None] * 4  # best discard, depending on trump
-        self.trump_score1  = [0] * 4
-        self.trump_score2  = [0] * 4
-        self.next_score1   = [0] * 4
-        self.next_score2   = [0] * 4
-        self.green_score1  = [0] * 4
-        self.green_score2  = [0] * 4
+    def __init__(self, cards, trump):
+        self.cards        = cards
+        self.trump        = trump
+
+        self.suitcount    = [0, 0, 0, 0]
+        self.suitcards    = [[], [], [], []]
+        self.trump_score  = [None] * 2
+        self.next_score   = [None] * 2
+        self.green_score  = [None] * 2
         # purple is the weaker off-color suit
-        self.purple_score1 = [0] * 4
-        self.purple_score2 = [0] * 4
-        self.trumps        = [0] * 4
-        self.aces          = [0] * 4     # only count off-aces
-        self.voids         = [None] * 4  # only count non-trump suits
-        self.singletons    = [None] * 4  # only count non-trump suits
+        self.purple_score = [None] * 2
+        self.trumps       = None
+        self.aces         = 0     # only count off-aces
+        self.voids        = None  # only count non-trump suits
+        self.singletons   = None  # only count non-trump suits
         # note that hand_score should not be used as part of the bidding (or playing)
         # logic; rather, the highest hand_score "seen" thus far in the bidding round
         # is used as a rough proxy for how likely the bid would have actually gotten
@@ -104,22 +89,97 @@ class HAnalysis(object):
         # allowed to use a god view as part of the game strategy (LATER, we can extend
         # this idea to take into account various bidding/playing styles in determining
         # the likeliness of a bidding opportunity)
-        self.hand_score    = [0] * 4
+        self.hand_score   = None
+        self.analyze_cards()
+
+    def analyze_cards(self):
+        """
+        """
+        tru_idx = self.trump['idx']
+        nxt_idx = tru_idx ^ 0x03
+        grn_idx = tru_idx ^ 0x01
+        pur_idx = tru_idx ^ 0x02
+
+        # process cards in hand
+        for card in self.cards:
+            suit_idx = card.suit['idx']
+            is_bower = card.rank == jack
+            is_ace   = card.rank == ace
+
+            if is_bower and suit_idx == nxt_idx:
+                self.suitcount[tru_idx] += 1
+                self.suitcards[tru_idx].append(card)
+            else:
+                self.suitcount[suit_idx] += 1
+                self.suitcards[suit_idx].append(card)
+
+            # only count off-suit aces
+            if suit_idx != tru_idx and is_ace:
+                self.aces += 1
+
+        # re-sort suitcards to include bower rankings (TODO: make this less ugly!!!)
+        self.suitcards[tru_idx].sort(key=lambda c: c.efflevel[tru_idx])
+
+        # count trumps/voids/singletons
+        count = self.suitcount.copy()
+        self.trumps = count[tru_idx]
+        del count[tru_idx]  # only count off-suits
+        self.voids      = len([c for c in count if c == 0])
+        self.singletons = len([c for c in count if c == 1])
+
+        # compute suit scores
+        tru_cards = self.suitcards[tru_idx]
+        nxt_cards = self.suitcards[nxt_idx]
+        grn_cards = self.suitcards[grn_idx]
+        pur_cards = self.suitcards[pur_idx]
+        self.trump_score[0]  = sum(c.efflevel[tru_idx]    for c in tru_cards)
+        self.trump_score[1]  = sum(c.efflevel[tru_idx]**2 for c in tru_cards)
+        self.next_score[0]   = sum(c.efflevel[tru_idx]    for c in nxt_cards)
+        self.next_score[1]   = sum(c.efflevel[tru_idx]**2 for c in nxt_cards)
+        self.green_score[0]  = sum(c.efflevel[tru_idx]    for c in grn_cards)
+        self.green_score[1]  = sum(c.efflevel[tru_idx]**2 for c in grn_cards)
+        self.purple_score[0] = sum(c.efflevel[tru_idx]    for c in pur_cards)
+        self.purple_score[1] = sum(c.efflevel[tru_idx]**2 for c in pur_cards)
+
+        # REVISIT: currently swap green and purple scores based on score[0], but
+        # could/should it be something else (e.g. score[1])???
+        if self.purple_score[0] > self.green_score[0]:
+            self.green_score[0], self.purple_score[0] = self.purple_score[0], self.green_score[0]
+            self.green_score[1], self.purple_score[1] = self.purple_score[1], self.green_score[1]
+
+        # TODO: hand score should take into account the turn card--penalty/reward
+        # for deliverying the trump into opponent or partner hand, or included in
+        # the computation for dealer hand (related to selecting discard, above)!!!
+        self.hand_score = self.trump_score[0] + \
+                          self.trumps + \
+                          self.voids * VOID_SUIT_VALUE + \
+                          self.aces * OFF_ACE_VALUE
+
+        self.log_debug()
+
+    @property
+    def card_tags(self):
+        return [c.tag for c in self.cards]
+
+    @property
+    def card_tags_by_suit(self):
+        return [[c.tag for c in s] for s in self.suitcards]
 
     def log_debug(self):
-        log.debug("Analyzing hand for %s"   % (self.parent.seat['name']))
-        log.debug("  cards by suit: %s"     % (self.suitcount))
-        log.debug("  trump score:   %s, %s" % (self.trump_score1, self.trump_score2))
-        log.debug("  next score:    %s, %s" % (self.next_score1, self.next_score2))
-        log.debug("  green score:   %s, %s" % (self.green_score1, self.green_score2))
-        log.debug("  purple score:  %s, %s" % (self.purple_score1, self.purple_score2))
-        log.debug("  trumps:        %s"     % (self.trumps))
-        log.debug("  aces:          %s"     % (self.aces))
-        log.debug("  voids:         %s"     % (self.voids))
-        log.debug("  singletons:    %s"     % (self.singletons))
-        log.debug("  hand score:    %s"     % (self.hand_score))
-        if self.discard[0]:
-            log.debug("  discard:       %s"     % ([str(c) for c in self.discard]))
+        """
+        """
+        log.debug("  with %s as trump:" % (self.trump['tag']))
+        log.debug("    cards by suit: %s" % (self.card_tags_by_suit))
+        log.debug("    count by suit: %s" % (self.suitcount))
+        log.debug("    trump score:   %s" % (self.trump_score))
+        log.debug("    next score:    %s" % (self.next_score))
+        log.debug("    green score:   %s" % (self.green_score))
+        log.debug("    purple score:  %s" % (self.purple_score))
+        log.debug("    trumps:        %s" % (self.trumps))
+        log.debug("    aces:          %s" % (self.aces))
+        log.debug("    voids:         %s" % (self.voids))
+        log.debug("    singletons:    %s" % (self.singletons))
+        log.debug("    hand score:    %s" % (self.hand_score))
 
 class Hand(object):
     """
@@ -128,23 +188,24 @@ class Hand(object):
         self.deal          = deal
         self.seat          = seat
         self.pos           = pos
-        self.cards         = cards.copy()  # do not disturb input list
         self.next_pos      = (pos + 1) % 4
         self.partner_pos   = (pos + 2) % 4
         self.prev_pos      = (pos + 3) % 4
+        self.cards         = cards.copy()  # do not disturb input list
         self.cards.sort(key=lambda c: c.sortkey)
-        # LATER: may have multiple analyses!!!
-        self.analysis      = None
+
+        # note that analysis (and best dealer discard) is based on turncard
+        self.turncard      = None  # basis for special dealer analysis
+        self.analysis      = None  # list (HandAnaly per trump suit)
+        self.discard       = None  # dealer only
 
     @property
     def team_idx(self):
         return self.seat['idx'] & 0x01
 
-    def __getattr__(self, key):
-        try:
-            return getattr(self.analysis, key)
-        except KeyError:
-            raise AttributeError()
+    @property
+    def card_tags(self):
+        return [c.tag for c in self.cards]
 
     def is_partner(self, hand):
         return hand.team_idx == self.team_idx
@@ -155,97 +216,35 @@ class Hand(object):
     def analyze(self, turncard, reanalyze = False):
         """
         """
-        if self.analysis and not reanalyze:
-            return self.analysis
+        if not self.analysis or reanalyze:
+            log.debug("%snalyzing hand for %s: %s" %
+                      ("Rea" if reanalyze else "A", self.seat['name'], self.card_tags))
+            self.turncard = turncard  # not currently used for non-dealer
+            self.analysis = [HandAnaly(self.cards, s) for s in SUITS]
 
-        self.analysis = HAnalysis(self)
-        hand_anl = self.analysis
-        # process cards in hand
-        for card in self.cards:
-            suit_idx = card.suit['idx']
-            is_bower = card.rank == jack
-            is_ace   = card.rank == ace
-            card.analyze()
-
-            for trump in SUITS:
-                tru_idx = trump['idx']
-                nxt_idx = tru_idx ^ 0x03
-                if is_bower and suit_idx == nxt_idx:
-                    hand_anl.suitcount[tru_idx][tru_idx] += 1
-                    hand_anl.suitcards[tru_idx][tru_idx].append(card)
-                else:
-                    hand_anl.suitcount[tru_idx][suit_idx] += 1
-                    hand_anl.suitcards[tru_idx][suit_idx].append(card)
-
-                # only count off-suit aces
-                if suit_idx != tru_idx and is_ace:
-                    hand_anl.aces[tru_idx] += 1
-
-        # fix up dealer hand
-        if self.pos == 3:
-            turn_idx = turncard.suit['idx']
-            # note that this may return the turncard, e.g. if it would be the
-            # lowest trump (or perhaps some wacky other reason)
-            hand_anl.discard[turn_idx] = self.bestdiscard(turncard)
-
-        # aggregation pass for possible trump suits
-        for trump in SUITS:
-            tru_idx = trump['idx']
-            nxt_idx = tru_idx ^ 0x03
-            grn_idx = tru_idx ^ 0x01
-            pur_idx = tru_idx ^ 0x02
-
-            # re-sort suitcards to include bower rankings (TODO: make this less ugly!!!)
-            hand_anl.suitcards[tru_idx][tru_idx].sort(key=lambda c: c.analysis.score1[tru_idx])
-
-            # count trumps/voids/singletons
-            count = hand_anl.suitcount[tru_idx].copy()
-            hand_anl.trumps[tru_idx] = count[tru_idx]
-            del count[tru_idx]  # only count off-suits
-            hand_anl.voids[tru_idx]      = len([c for c in count if c == 0])
-            hand_anl.singletons[tru_idx] = len([c for c in count if c == 1])
-
-            # compute suit scores
-            tru_cards = hand_anl.suitcards[tru_idx][tru_idx]
-            nxt_cards = hand_anl.suitcards[tru_idx][nxt_idx]
-            grn_cards = hand_anl.suitcards[tru_idx][grn_idx]
-            pur_cards = hand_anl.suitcards[tru_idx][pur_idx]
-            hand_anl.trump_score1[tru_idx]  = sum(c.analysis.score1[tru_idx] for c in tru_cards)
-            hand_anl.trump_score2[tru_idx]  = sum(c.analysis.score2[tru_idx] for c in tru_cards)
-            hand_anl.next_score1[tru_idx]   = sum(c.analysis.score1[tru_idx] for c in nxt_cards)
-            hand_anl.next_score2[tru_idx]   = sum(c.analysis.score2[tru_idx] for c in nxt_cards)
-            hand_anl.green_score1[tru_idx]  = sum(c.analysis.score1[tru_idx] for c in grn_cards)
-            hand_anl.green_score2[tru_idx]  = sum(c.analysis.score2[tru_idx] for c in grn_cards)
-            hand_anl.purple_score1[tru_idx] = sum(c.analysis.score1[tru_idx] for c in pur_cards)
-            hand_anl.purple_score2[tru_idx] = sum(c.analysis.score2[tru_idx] for c in pur_cards)
-
-            # REVISIT: currently swap green and purple scores based on score1, but
-            # should it be something else (e.g. score2)???
-            if hand_anl.purple_score1[tru_idx] > hand_anl.green_score1[tru_idx]:
-                hand_anl.green_score1[tru_idx], hand_anl.purple_score1[tru_idx] = \
-                    hand_anl.purple_score1[tru_idx], hand_anl.green_score1[tru_idx]
-                hand_anl.green_score2[tru_idx], hand_anl.purple_score2[tru_idx] = \
-                    hand_anl.purple_score2[tru_idx], hand_anl.green_score2[tru_idx]
-
-            # TODO: hand score should take into account the turn card--penalty/reward
-            # for deliverying the trump into opponent or partner hand, or included in
-            # the computation for dealer hand (related to selecting discard, above)!!!
-            hand_anl.hand_score[tru_idx] = hand_anl.trump_score1[tru_idx] + \
-                                           hand_anl.trumps[tru_idx] + \
-                                           hand_anl.voids[tru_idx] * VOID_SUIT_VALUE + \
-                                           hand_anl.aces[tru_idx] * OFF_ACE_VALUE
-
-        hand_anl.log_debug()
+            # fix up dealer hand based on turncard
+            if self.pos == 3:
+                newcards = self.cards.copy()
+                newcards.append(turncard)
+                # note that the following may actually return the turncard, e.g. if it
+                # would be the lowest trump (or perhaps some wacky other reason)
+                discard = self.bestdiscard(turncard)
+                newcards.remove(discard)
+                log.debug("Reanalyzing dealer hand with turncard (%s) and discard (%s)" %
+                          (turncard.tag, discard.tag))
+                reanalysis = HandAnaly(newcards, turncard.suit)
+                self.discard = discard
+                self.analysis[turncard.suit['idx']] = reanalysis
 
     def bestdiscard(self, turncard):
         """
         """
-        hand_anl = self.analysis
         trump = turncard.suit
         tru_idx = trump['idx']
         nxt_idx = tru_idx ^ 0x03
-        suitcount = hand_anl.suitcount[tru_idx]
-        suitcards = hand_anl.suitcards[tru_idx]
+        hand_anl = self.analysis[tru_idx]
+        suitcount = hand_anl.suitcount
+        suitcards = hand_anl.suitcards
 
         # Handle all trump case (get it out of the way)
         if suitcount[tru_idx] == len(self.cards):
@@ -318,59 +317,27 @@ class Hand(object):
     def pickup(self, turncard):
         """
         """
-        hand_anl = self.analysis
         tru_idx = turncard.suit['idx']
-        hand_anl.suitcount_tru = hand_anl.suitcount[tru_idx].copy()
-        hand_anl.suitcards_tru = hand_anl.suitcards[tru_idx].copy()
-        suitcount = hand_anl.suitcount[tru_idx]
-        suitcards = hand_anl.suitcards[tru_idx]
+        hand_anl = self.analysis[tru_idx]
+        hand_anl.suitcount_tru = hand_anl.suitcount.copy()
+        hand_anl.suitcards_tru = hand_anl.suitcards.copy()
+        suitcount = hand_anl.suitcount
+        suitcards = hand_anl.suitcards
 
-        turncard.analyze()
         suitcards[tru_idx].append(turncard)
         suitcount[tru_idx] += 1
         assert suitcount[tru_idx] == len(suitcards[tru_idx])
         log.debug("%s picking up %s" % (self.seat['name'], turncard.tag))
 
-        disc = hand_anl.discard[tru_idx]
+        disc = hand_anl.discard
         disc_idx = disc.suit['idx']
         suitcards[disc_idx].remove(disc)
         suitcount[disc_idx] -= 1
         assert suitcount[disc_idx] == len(suitcards[disc_idx])
         log.debug("%s discarding %s" % (self.seat['name'], disc.tag))
 
-        suitcards[tru_idx].sort(key=lambda c: c.analysis.score1[tru_idx])
+        suitcards[tru_idx].sort(key=lambda c: c.efflevel[tru_idx])
         log.debug("%s new hand: %s" % (self.seat['name'], [[c.tag for c in s] for s in suitcards]))
-
-    def getanalysis(self, trump):
-        """
-        :param trump: dict
-        :return: dict with analysis info
-        """
-        idx = trump['idx']
-        hand_anl = self.analysis
-        info = {'suitcount':  hand_anl.suitcount[idx],
-                'suitcards':  hand_anl.suitcards[idx],
-                'tru_score1': hand_anl.trump_score1[idx],
-                'tru_score2': hand_anl.trump_score2[idx],
-                'nxt_score1': hand_anl.next_score1[idx],
-                'nxt_score2': hand_anl.next_score2[idx],
-                'grn_score1': hand_anl.green_score1[idx],
-                'grn_score2': hand_anl.green_score2[idx],
-                'pur_score1': hand_anl.purple_score1[idx],
-                'pur_score2': hand_anl.purple_score2[idx],
-                'trumps'    : hand_anl.trumps[idx],
-                'aces'      : hand_anl.aces[idx],
-                'voids'     : hand_anl.voids[idx],
-                'singletons': hand_anl.singletons[idx],
-                'hand_score': hand_anl.hand_score[idx]}
-        info_debug = info.copy()
-        info_debug.update({'suitcards': [[c.tag for c in s] for s in hand_anl.suitcards[idx]]})
-        if self.pos == 3:
-            info_debug.update({'discard': hand_anl.discard[idx].tag})
-        log.debug("%s trump analysis for %s:\n%s" %
-                  (trump['tag'], [c.tag for c in self.cards],
-                   pp(info_debug, sort_keys=False, noprint=True)))
-        return info
 
     def bestsuit(self, exclude = None):
         """
@@ -379,7 +346,7 @@ class Hand(object):
         suits = SUITS.copy()
         if exclude:
             del suits[exclude['idx']]
-        return max(suits, key=lambda s: self.analysis.hand_score[s['idx']])
+        return max(suits, key=lambda s: self.analysis[s['idx']].hand_score)
 
     def biddable(self, trump, round):
         """
@@ -395,7 +362,7 @@ class Hand(object):
             thresh -= DEALER_VALUE
         elif round == 2:
             thresh -= self.pos  # or whatever...
-        return self.analysis.hand_score[idx] > thresh
+        return self.analysis[idx].hand_score > thresh
 
 ###########
 # Testing #

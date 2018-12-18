@@ -146,7 +146,7 @@ class Deal(object):
         """
         if self.deck and not force:
             raise LogicError("Cannot shuffle if deck is already shuffled")
-        self.deck = [Card(c) for c in random.sample(CARDS, k=len(CARDS))]
+        self.deck = [Card(c, self) for c in random.sample(CARDS, k=len(CARDS))]
 
     def deal(self, force = False):
         """
@@ -172,7 +172,7 @@ class Deal(object):
         self.bury = self.deck[cardno:]
         self.turncard = self.bury.pop()
         if param.get('debug'):
-            self.dump()
+            self.log_debug('hands')
 
         self.bids = []
 
@@ -180,6 +180,9 @@ class Deal(object):
         """
         :return: suit (trunp) or None (meaning passed deal)
         """
+        for hand in self.hands:
+            hand.analyze(self.turncard)
+
         log.info("Bidding for deal #%d begins" % (self.dealno))
         bidder = self.hands[0]
         while len(self.bids) < 8:
@@ -206,9 +209,8 @@ class Deal(object):
                      (bid['name'].capitalize(), TEAMS[bidder.team_idx]['tag']))
 
             for hand in self.hands:
-                if hand.pos == 3:
-                    hand.pickup(self.turncard)
-                hand.playcards = hand.analysis.suitcards[bid['idx']]
+                hand.cards = hand.analysis[bid['idx']].cards
+                hand.suitcards = hand.analysis[bid['idx']].suitcards
         else:
             log.info("Deal is passed")
 
@@ -288,22 +290,23 @@ class Deal(object):
         """
         pass
 
-    def dump(self, what = None):
+    def log_debug(self, what = None):
         """
         :return: void
         """
-        print("Deal #%d" % (self.dealno))
+        if not what or 'header' in what:
+            log.debug("Deal #%d" % (self.dealno))
 
-        if self.dealer:
-            print("  Dealer: %s" % (self.dealer['name']))
+        if not what or 'dealer' in what:
+            log.debug("  Dealer: %s" % (self.dealer['name']))
 
-        if self.hands:
-            print("  Hands:")
+        if not what or 'hands' in what:
+            log.debug("  Hands:")
             for hand in self.hands:
-                print("    %-5s (%d): %s" %
+                log.debug("    %-5s (%d): %s" %
                       (hand.seat['name'], hand.pos, [c.tag for c in hand.cards]))
-            print("  Turncard: %s" % (self.turncard.tag))
-            print("  Buried: %s" % ([c.tag for c in self.bury]))
+            log.debug("  Turncard: %s" % (self.turncard.tag))
+            log.debug("  Buried: %s" % ([c.tag for c in self.bury]))
 
 ###########
 # Testing #
