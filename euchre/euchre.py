@@ -93,6 +93,44 @@ class Game(object):
 # Deal #
 ########
 
+class DealStats(object):
+    """
+    """
+    def __init__(self, deal):
+        if not deal.contract:
+            raise LogicError("Contract must be set for DealStats deal")
+
+        self.deal   = deal
+        self.unseen = [[], [], [], []]
+        self.seen   = [[], [], [], []]
+
+        for c in self.deal.deck:
+            self.unseen[c.suit['idx']].append(c)
+        tru_idx = self.deal.contract['idx']
+        for suitcards in self.unseen:
+            suitcards.sort(key=lambda c: c.efflevel[tru_idx])  # slghtly more efficient than c.level
+
+        if self.deal.turncard:
+            self.card_seen(self.deal.turncard)
+
+    def card_seen(self, card):
+        """
+        """
+        suit_idx = card.suit['idx']
+        self.unseen[suit_idx].remove(card)
+        # not pretty, but oh well...
+        self.seen[suit_idx].append(card)
+        tru_idx = self.deal.contract['idx']
+        self.seen[suit_idx].sort(key=lambda c: c.efflevel[tru_idx])
+
+    @property
+    def high_cards(self):
+        """Return list of high cards remaining (unseen), indexed by suit number (value of
+        None for a suit indicates all cards have been seen)
+        """
+        return [self.unseen[idx][-1] if self.unseen[idx] else None
+                for idx in range(0, self.unseen)]
+
 class Deal(object):
     """Represents a single shuffle, deal, bidding, and playing of the cards
 
@@ -104,7 +142,7 @@ class Deal(object):
         """
         self.game     = game
         self.match    = game.match
-        self.dealer   = game.match.curdealer
+        self.dealer   = game.match.curdealer  # note, this is a seat, not a hand!
         self.deck     = None  # [cards] -- shuffled
         self.hands    = None  # [hands] -- ordered by position (0 = first bid, 3 = dealer)
         self.bury     = None  # [cards] -- len 3 during first round bids, otherwise len 4
@@ -116,6 +154,7 @@ class Deal(object):
         self.caller   = None  # hand
         self.plays    = None  # [(player_hand, card), ...]
         self.tricks   = None  # [(winner_hand, [cards]), ...]
+        self.stats    = None
 
     @property
     def dealno(self):
@@ -171,8 +210,7 @@ class Deal(object):
         self.hands.sort(key=lambda h: h.pos)
         self.bury = self.deck[cardno:]
         self.turncard = self.bury.pop()
-        if param.get('debug'):
-            self.log_debug('hands')
+        self.log_info('hands')
 
         self.bids = []
 
@@ -182,6 +220,9 @@ class Deal(object):
         """
         for hand in self.hands:
             hand.analyze(self.turncard)
+        dealer_hand = self.hands[3]
+        if not dealer_hand.discard:
+            raise RuntimeError("Dealer hand analysis must select best discard")
 
         log.info("Bidding for deal #%d begins" % (self.dealno))
         bidder = self.hands[0]
@@ -192,13 +233,32 @@ class Deal(object):
             # a structure containing insight into bid decision, so we would have to check
             # for a pass within it explicitly!!!
             if bid:
-                log.info("  %s calls %s" % (bidder.seat['name'], bid['name']))
+                if len(self.bids) < 4:
+                    if bid != self.turncard.suit:
+                        raise RuntimeError("Illegal bid, %s does not match turncard %s" %
+                                           (bid['name'], self.turncard.tag))
+                    self.bury.append(dealer_hand.discard)
+                    log.info("  %s orders up %s" % (bidder.seat['name'], self.turncard.tag))
+                elif len(self.bids) == 4:
+                    if bid != self.turncard.suit:
+                        raise RuntimeError("Illegal bid, %s does not match turncard %s" %
+                                           (bid['name'], self.turncard.tag))
+                    assert bidder == dealer_hand
+                    self.bury.append(bidder.discard)
+                    log.info("  %s (dealer) picks up %s" % (bidder.seat['name'], self.turncard.tag))
+                else:
+                    if bid == self.turncard.suit:
+                        raise RuntimeError("Illegal bid, %s must be different than turncard %s" %
+                                           (bid['name'], self.turncard.tag))
+                    log.info("  %s calls %s" % (bidder.seat['name'], bid['name']))
                 break
             elif len(self.bids) == 4:
+                assert bidder == dealer_hand
+                self.bury.append(self.turncard)
                 log.info("  %s passes, turns down %s" % (bidder.seat['name'], self.turncard.tag))
             else:
                 log.info("  %s passes" % (bidder.seat['name']))
-            bidder = bidder.next()
+            bidder = bidder.next
 
         if bid:
             self.caller   = bidder
@@ -209,12 +269,45 @@ class Deal(object):
                      (bid['name'].capitalize(), TEAMS[bidder.team_idx]['tag']))
 
             for hand in self.hands:
-                hand.cards = hand.analysis[bid['idx']].cards
-                hand.suitcards = hand.analysis[bid['idx']].suitcards
+                hand.set_trump()
+            if len(self.bids) <= 4 and dealer_hand.discard in dealer_hand.cards:
+                raise RuntimeError("Discard should not be in dealer hand")
+            if len(self.bids) > 4 and self.turncard in dealer_hand.cards:
+                raise RuntimeError("Turncard should not be in dealer hand")
+            self.stats = DealStats(self)
         else:
             log.info("Deal is passed")
 
         return bid  # see REVISIT above on interpretation of bid
+
+    @property
+    def is_next_call(self):
+        return self.is_nextsuit and len(self.bids) == 5
+
+    @property
+    def is_reverse_next(self):
+        return self.is_greensuit and len(self.bids) == 6
+
+    @property
+    def is_turnsuit(self):
+        if not self.contract:
+            raise LogicError("Bad call sequence, bidding not complete")
+        turn_idx = self.turncard.suit['idx']
+        return self.contract['idx'] == turn_idx
+
+    @property
+    def is_nextsuit(self):
+        if not self.contract:
+            raise LogicError("Bad call sequence, bidding not complete")
+        turn_idx = self.turncard.suit['idx']
+        return self.contract['idx'] == turn_idx ^ 0x03
+
+    @property
+    def is_greensuit(self):
+        if not self.contract:
+            raise LogicError("Bad call sequence, bidding not complete")
+        turn_idx = self.turncard.suit['idx']
+        return self.contract['idx'] in (turn_idx ^ 0x01, turn_idx ^ 0x02)
 
     def cmpcards(self, lead, winning, played):
         """
@@ -239,7 +332,7 @@ class Deal(object):
         """
         :return: score [E/W tricks, N/S tricks]
         """
-        tricks = [0, 0]
+        team_tricks = [0, 0]
         player  = self.hands[0]
         while len(self.tricks) < 5:
             plays   = []            # [(player_hand, card), ...]
@@ -264,25 +357,24 @@ class Deal(object):
                     log.info("  %s leads %s%s" % (player.seat['name'], card.tag, note))
                 else:
                     log.info("  %s plays %s%s" % (player.seat['name'], card.tag, note))
-                player = player.next()
+                player = player.next
 
             winning_hand = winning[0]  # for readability (as above)
             winning_card = winning[1]
             self.plays += plays
             self.tricks.append((winning_hand, cards))
             team_idx = winning_hand.team_idx
-            tricks[team_idx] += 1
+            team_tricks[team_idx] += 1
             log.info("%s takes trick #%d with %s (%d-%d)" %
                      (winning_hand.seat['name'].capitalize(), trickno, winning_card.tag,
-                      tricks[team_idx], tricks[team_idx ^ 0x01]))
+                      team_tricks[team_idx], team_tricks[team_idx ^ 0x01]))
             player = winning_hand
 
+        winning_team = TEAMS[0] if team_tricks[0] > team_tricks[1] else TEAMS[1]
         log.info("%s tricks: %d, %s tricks: %d" %
-                 (TEAMS[0]['tag'], tricks[0], TEAMS[1]['tag'], tricks[1]))
-        log.info("%s wins deal #%d" %
-                 ((TEAMS[0]['name'] if tricks[0] > tricks[1] else TEAMS[1]['name']).title(),
-                  self.dealno))
-        return tricks
+                 (TEAMS[0]['tag'], team_tricks[0], TEAMS[1]['tag'], team_tricks[1]))
+        log.info("%s wins deal #%d" % (winning_team['name'].title(), self.dealno))
+        return team_tricks
 
     def tabulate(self):
         """
@@ -290,23 +382,23 @@ class Deal(object):
         """
         pass
 
-    def log_debug(self, what = None):
+    def log_info(self, what = None):
         """
         :return: void
         """
         if not what or 'header' in what:
-            log.debug("Deal #%d" % (self.dealno))
+            log.info("Deal #%d" % (self.dealno))
 
         if not what or 'dealer' in what:
-            log.debug("  Dealer: %s" % (self.dealer['name']))
+            log.info("  Dealer: %s" % (self.dealer['name']))
 
         if not what or 'hands' in what:
-            log.debug("  Hands:")
+            log.info("  Hands:")
             for hand in self.hands:
-                log.debug("    %-5s (%d): %s" %
+                log.info("    %-5s (%d): %s" %
                       (hand.seat['name'], hand.pos, [c.tag for c in hand.cards]))
-            log.debug("  Turncard: %s" % (self.turncard.tag))
-            log.debug("  Buried: %s" % ([c.tag for c in self.bury]))
+            log.info("  Turncard: %s" % (self.turncard.tag))
+            log.info("  Buried: %s" % ([c.tag for c in self.bury]))
 
 ###########
 # Testing #
@@ -322,9 +414,9 @@ def test(seed = None, ndeals = 1):
         d.play()
 
 if __name__ == '__main__':
+    log.addHandler(dbg_hand)
     if param.get('debug'):
         log.setLevel(logging.DEBUG)
-        log.addHandler(dbg_hand)
 
     # Usage: euchre.py [<seed> [<ndeals>}]
     prog = sys.argv.pop(0)

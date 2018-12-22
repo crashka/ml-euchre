@@ -193,11 +193,13 @@ class Hand(object):
         self.prev_pos      = (pos + 3) % 4
         self.cards         = cards.copy()  # do not disturb input list
         self.cards.sort(key=lambda c: c.sortkey)
+        self.suitcards     = None  # set in set_trump()
 
         # note that analysis (and best dealer discard) is based on turncard
         self.turncard      = None  # basis for special dealer analysis
         self.analysis      = None  # list (HandAnaly per trump suit)
         self.discard       = None  # dealer only
+        self.strategy      = None  # list of string tags for playing phase
 
     @property
     def team_idx(self):
@@ -207,11 +209,16 @@ class Hand(object):
     def card_tags(self):
         return [c.tag for c in self.cards]
 
-    def is_partner(self, hand):
-        return hand.team_idx == self.team_idx
+    def is_partner(self, other):
+        return other == self.partner
 
+    @property
     def next(self):
         return self.deal.hands[self.next_pos]
+
+    @property
+    def partner(self):
+        return self.deal.hands[self.partner_pos]
 
     def analyze(self, turncard, reanalyze = False):
         """
@@ -314,30 +321,65 @@ class Hand(object):
         log.debug("Discard %s if %s trump, lowest card" % (mincard.tag, trump['tag']))
         return mincard
 
-    def pickup(self, turncard):
+    def set_trump(self):
         """
         """
-        tru_idx = turncard.suit['idx']
-        hand_anl = self.analysis[tru_idx]
-        hand_anl.suitcount_tru = hand_anl.suitcount.copy()
-        hand_anl.suitcards_tru = hand_anl.suitcards.copy()
-        suitcount = hand_anl.suitcount
-        suitcards = hand_anl.suitcards
+        tru_idx = self.deal.contract['idx']
+        self.cards = self.analysis[tru_idx].cards
+        self.suitcards = self.analysis[tru_idx].suitcards
 
-        suitcards[tru_idx].append(turncard)
-        suitcount[tru_idx] += 1
-        assert suitcount[tru_idx] == len(suitcards[tru_idx])
-        log.debug("%s picking up %s" % (self.seat['name'], turncard.tag))
+    def play_card(self, card):
+        """
+        :param card: Card (must be in hand)
+        :return: card (for convenience, chaining, etc.)
+        """
+        suit_idx = card.suit['idx']
+        self.cards.remove(card)
+        self.suitcards[suit_idx].remove(card)
+        return card
 
-        disc = hand_anl.discard
-        disc_idx = disc.suit['idx']
-        suitcards[disc_idx].remove(disc)
-        suitcount[disc_idx] -= 1
-        assert suitcount[disc_idx] == len(suitcards[disc_idx])
-        log.debug("%s discarding %s" % (self.seat['name'], disc.tag))
+    @property
+    def has_bower(self):
+        """
+        :return: true if one or more bowers in hand
+        """
+        tru_cards = self.trump_cards
+        return tru_cards and tru_cards[-1].level >= left['level']
 
-        suitcards[tru_idx].sort(key=lambda c: c.efflevel[tru_idx])
-        log.debug("%s new hand: %s" % (self.seat['name'], [[c.tag for c in s] for s in suitcards]))
+    @property
+    def has_off_ace(self):
+        """
+        :return: true if one or more off aces in hand
+        """
+        return len(self.off_aces) > 0
+
+    @property
+    def trump_cards(self):
+        """
+        :return: list of cards
+        """
+        tru_idx = self.deal.contract['idx']
+        return self.suitcards[tru_idx]
+
+    @property
+    def green_suitcards(self):
+        """
+        :return: tuple (two lists of cards)
+        """
+        tru_idx = self.deal.contract['idx']
+        grn_cards = self.suitcards[tru_idx ^ 0x01]
+        pur_cards = self.suitcards[tru_idx ^ 0x02]
+        return (grn_cards, pur_cards) if len(grn_cards) >= len(pur_cards) \
+            else (pur_cards, grn_cards)
+
+    @property
+    def off_aces(self):
+        """
+        :return: list
+        """
+        trump = self.deal.contract
+        return [scs[-1] for scs in self.suitcards
+                if scs and scs[-1].rank == ace and scs[-1].suit != trump]
 
     def bestsuit(self, exclude = None):
         """
