@@ -110,9 +110,6 @@ class DealStats(object):
         for suitcards in self.unseen:
             suitcards.sort(key=lambda c: c.efflevel[tru_idx])  # slghtly more efficient than c.level
 
-        if self.deal.turncard:
-            self.card_seen(self.deal.turncard)
-
     def card_seen(self, card):
         """
         """
@@ -128,8 +125,7 @@ class DealStats(object):
         """Return list of high cards remaining (unseen), indexed by suit number (value of
         None for a suit indicates all cards have been seen)
         """
-        return [self.unseen[idx][-1] if self.unseen[idx] else None
-                for idx in range(0, self.unseen)]
+        return [s[-1] if s else None for s in self.unseen]
 
 class Deal(object):
     """Represents a single shuffle, deal, bidding, and playing of the cards
@@ -168,16 +164,15 @@ class Deal(object):
         :return: void
         """
         # shuffle and deal
-        log.info("Deal #%d: dealer is %s" % (self.dealno, self.dealer['name']))
+        self.log_info('header')
         self.shuffle()
         self.deal()
 
         # bidding and playing tricks
         bid = self.bid()
         if bid:
-            score = self.playtricks()
-
-        self.tabulate()
+            team_tricks = self.playtricks()
+            team_scores = self.tabulate(team_tricks)
 
     def shuffle(self, force = False):
         """
@@ -275,6 +270,7 @@ class Deal(object):
             if len(self.bids) > 4 and self.turncard in dealer_hand.cards:
                 raise RuntimeError("Turncard should not be in dealer hand")
             self.stats = DealStats(self)
+            self.log_info('hands')
         else:
             log.info("Deal is passed")
 
@@ -339,12 +335,14 @@ class Deal(object):
             cards   = []            # [cards]
             winning = (None, None)  # (player_hand, card)
             trickno = len(self.tricks) + 1
+            log.info("Trick #%d:" % (trickno))
             while len(plays) < 4:
                 note = ''
                 winning_card = winning[1]  # just for semantic readability
                 card = playing.play(player, plays, winning)
                 cards.append(card)
                 plays.append((player, card))
+                self.stats.card_seen(card)
                 if not winning_card:
                     winning = (player, card)
                     note = ' (currently winning)'
@@ -353,7 +351,6 @@ class Deal(object):
                         winning = (player, card)
                         note = ' (currently winning)'
                 if len(plays) == 1:
-                    log.info("Trick #%d:" % (trickno))
                     log.info("  %s leads %s%s" % (player.seat['name'], card.tag, note))
                 else:
                     log.info("  %s plays %s%s" % (player.seat['name'], card.tag, note))
@@ -376,28 +373,46 @@ class Deal(object):
         log.info("%s wins deal #%d" % (winning_team['name'].title(), self.dealno))
         return team_tricks
 
-    def tabulate(self):
+    def tabulate(self, team_tricks):
         """
         :return: void
         """
-        pass
+        team_scores  = [0, 0]
+        caller_idx   = self.caller.team_idx
+        defender_idx = caller_idx ^ 0x01
+        tricks_made  = team_tricks[caller_idx]
 
-    def log_info(self, what = None):
+        if tricks_made >= 3:
+            team_scores[caller_idx] += 1
+            if tricks_made == 5:
+                team_scores[caller_idx] += 1
+        else:
+            team_scores[defender_idx] += 2
+
+        log.debug("Caller (%s) points: %d" % (TEAMS[caller_idx]['name'].title(),
+                                              team_scores[caller_idx] - team_scores[defender_idx]))
+        return team_scores
+
+    def log_info(self, *what):
         """
         :return: void
         """
         if not what or 'header' in what:
-            log.info("Deal #%d" % (self.dealno))
+            log.info("Deal #%d, dealer is %s" % (self.dealno, self.dealer['name']))
 
-        if not what or 'dealer' in what:
-            log.info("  Dealer: %s" % (self.dealer['name']))
+        if not what or 'caller' in what:
+            log.info("  Caller: %s" % (self.caller.seat['name']))
+
+        if not what or 'contract' in what:
+            log.info("  Trump: %s" % (self.contract['name']))
 
         if not what or 'hands' in what:
-            log.info("  Hands:")
+            log.info("  %s hands:" % ("Bidding" if not self.contract else "Playing"))
             for hand in self.hands:
                 log.info("    %-5s (%d): %s" %
                       (hand.seat['name'], hand.pos, [c.tag for c in hand.cards]))
-            log.info("  Turncard: %s" % (self.turncard.tag))
+            if not self.contract and (not self.bids or len(self.bids) < 4):
+                log.info("  Turncard: %s" % (self.turncard.tag))
             log.info("  Buried: %s" % ([c.tag for c in self.bury]))
 
 ###########

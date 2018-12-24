@@ -90,6 +90,10 @@ class HandAnaly(object):
         # this idea to take into account various bidding/playing styles in determining
         # the likeliness of a bidding opportunity)
         self.hand_score   = None
+
+        # NOTE: this does not sort bowers (as in Hand.__init__), could/should resort
+        # properly in Hand.set_trump
+        self.cards.sort(key=lambda c: c.sortkey)
         self.analyze_cards()
 
     def analyze_cards(self):
@@ -155,7 +159,7 @@ class HandAnaly(object):
                           self.voids * VOID_SUIT_VALUE + \
                           self.aces * OFF_ACE_VALUE
 
-        self.log_debug()
+        self.log_trae()
 
     @property
     def card_tags(self):
@@ -165,21 +169,21 @@ class HandAnaly(object):
     def card_tags_by_suit(self):
         return [[c.tag for c in s] for s in self.suitcards]
 
-    def log_debug(self):
+    def log_trae(self):
         """
         """
-        log.debug("  with %s as trump:" % (self.trump['tag']))
-        log.debug("    cards by suit: %s" % (self.card_tags_by_suit))
-        log.debug("    count by suit: %s" % (self.suitcount))
-        log.debug("    trump score:   %s" % (self.trump_score))
-        log.debug("    next score:    %s" % (self.next_score))
-        log.debug("    green score:   %s" % (self.green_score))
-        log.debug("    purple score:  %s" % (self.purple_score))
-        log.debug("    trumps:        %s" % (self.trumps))
-        log.debug("    aces:          %s" % (self.aces))
-        log.debug("    voids:         %s" % (self.voids))
-        log.debug("    singletons:    %s" % (self.singletons))
-        log.debug("    hand score:    %s" % (self.hand_score))
+        log.trace("  with %s as trump:" % (self.trump['tag']))
+        log.trace("    cards by suit: %s" % (self.card_tags_by_suit))
+        log.trace("    count by suit: %s" % (self.suitcount))
+        log.trace("    trump score:   %s" % (self.trump_score))
+        log.trace("    next score:    %s" % (self.next_score))
+        log.trace("    green score:   %s" % (self.green_score))
+        log.trace("    purple score:  %s" % (self.purple_score))
+        log.trace("    trumps:        %s" % (self.trumps))
+        log.trace("    aces:          %s" % (self.aces))
+        log.trace("    voids:         %s" % (self.voids))
+        log.trace("    singletons:    %s" % (self.singletons))
+        log.trace("    hand score:    %s" % (self.hand_score))
 
 class Hand(object):
     """
@@ -199,7 +203,7 @@ class Hand(object):
         self.turncard      = None  # basis for special dealer analysis
         self.analysis      = None  # list (HandAnaly per trump suit)
         self.discard       = None  # dealer only
-        self.strategy      = None  # list of string tags for playing phase
+        self.strategy      = []    # list of string tags for playing phase
 
     @property
     def team_idx(self):
@@ -208,6 +212,10 @@ class Hand(object):
     @property
     def card_tags(self):
         return [c.tag for c in self.cards]
+
+    @property
+    def card_tags_by_suit(self):
+        return [[c.tag for c in s] for s in self.suitcards]
 
     def is_partner(self, other):
         return other == self.partner
@@ -224,7 +232,7 @@ class Hand(object):
         """
         """
         if not self.analysis or reanalyze:
-            log.debug("%snalyzing hand for %s: %s" %
+            log.trace("%snalyzing hand for %s: %s" %
                       ("Rea" if reanalyze else "A", self.seat['name'], self.card_tags))
             self.turncard = turncard  # not currently used for non-dealer
             self.analysis = [HandAnaly(self.cards, s) for s in SUITS]
@@ -237,7 +245,7 @@ class Hand(object):
                 # would be the lowest trump (or perhaps some wacky other reason)
                 discard = self.bestdiscard(turncard)
                 newcards.remove(discard)
-                log.debug("Reanalyzing dealer hand with turncard (%s) and discard (%s)" %
+                log.trace("Reanalyzing dealer hand with turncard (%s) and discard (%s)" %
                           (turncard.tag, discard.tag))
                 reanalysis = HandAnaly(newcards, turncard.suit)
                 self.discard = discard
@@ -256,7 +264,7 @@ class Hand(object):
         # Handle all trump case (get it out of the way)
         if suitcount[tru_idx] == len(self.cards):
             discard = min(suitcards[tru_idx][0], turncard, key=lambda c: c.level)
-            log.debug("Discard %s if %s trump, lowest trump" % (discard.tag, trump['tag']))
+            log.trace("Discard %s if %s trump, lowest trump" % (discard.tag, trump['tag']))
             return discard
 
         # Create void if possible
@@ -273,7 +281,7 @@ class Hand(object):
                     mincard = suitcards[idx][0]
                     minlevel = mincard.level
             if mincard:
-                log.debug("Discard %s if %s trump, voiding suit" % (mincard.tag, trump['tag']))
+                log.trace("Discard %s if %s trump, voiding suit" % (mincard.tag, trump['tag']))
                 return mincard
 
         # Create doubletons, if possible (favor over creating singletons)
@@ -284,7 +292,7 @@ class Hand(object):
             if idx != tru_idx:
                 # note that first element is the loweest (cards sorted ascending)
                 discard = suitcards[idx][0]
-                log.debug("Discard %s if %s trump, creating doubleton" % (discard.tag, trump['tag']))
+                log.trace("Discard %s if %s trump, creating doubleton" % (discard.tag, trump['tag']))
                 return discard
 
         # Discard next if loner call from third seat (REVISIT: not sure it makes sense
@@ -293,7 +301,7 @@ class Hand(object):
             # don't unguard doubleton king or break up A-K
             if king not in (c.rank for c in suitcards[nxt_idx]):
                 discard = suitcards[nxt_idx][0]
-                log.debug("Discard %s if %s trump, reducing next" % (discard.tag, trump['tag']))
+                log.trace("Discard %s if %s trump, reducing next" % (discard.tag, trump['tag']))
                 return discard
 
         # Discard lowest card, any suit (last resort)
@@ -317,8 +325,8 @@ class Hand(object):
         assert mincard or savecards
         if not mincard:
             mincard = min(savecards, key=lambda c: c.level)
-            log.debug("Have to unguard doubleton king or discard from A-K, oh well...")
-        log.debug("Discard %s if %s trump, lowest card" % (mincard.tag, trump['tag']))
+            log.trace("Have to unguard doubleton king or discard from A-K, oh well...")
+        log.trace("Discard %s if %s trump, lowest card" % (mincard.tag, trump['tag']))
         return mincard
 
     def set_trump(self):
