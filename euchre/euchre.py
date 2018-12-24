@@ -331,11 +331,11 @@ class Deal(object):
         team_tricks = [0, 0]
         player  = self.hands[0]
         while len(self.tricks) < 5:
-            plays   = []            # [(player_hand, card), ...]
-            cards   = []            # [cards]
-            winning = (None, None)  # (player_hand, card)
-            trickno = len(self.tricks) + 1
-            log.info("Trick #%d:" % (trickno))
+            plays    = []            # [(player_hand, card), ...]
+            cards    = []            # [cards]
+            winning  = (None, None)  # (player_hand, card)
+            trick_no = len(self.tricks) + 1
+            log.info("Trick #%d:" % (trick_no))
             while len(plays) < 4:
                 note = ''
                 winning_card = winning[1]  # just for semantic readability
@@ -363,7 +363,7 @@ class Deal(object):
             team_idx = winning_hand.team_idx
             team_tricks[team_idx] += 1
             log.info("%s takes trick #%d with %s (%d-%d)" %
-                     (winning_hand.seat['name'].capitalize(), trickno, winning_card.tag,
+                     (winning_hand.seat['name'].capitalize(), trick_no, winning_card.tag,
                       team_tricks[team_idx], team_tricks[team_idx ^ 0x01]))
             player = winning_hand
 
