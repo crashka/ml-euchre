@@ -4,7 +4,7 @@
 import random
 from enum import Enum, auto
 
-from core import log, ace, right, left
+from core import log, ace, right
 
 class Strategy(Enum):
     DRAW_TRUMP     = auto()
@@ -177,7 +177,7 @@ def play(hand, plays, winning):
         """
         suitcards = hand.suitcards.copy()
         suitcards.sort(key=lambda s: len(s))
-        # TODO: a little more logic in choosing suit!!!
+        # TODO: a little more logic in choosing suit (perhaps avoid trump, if possible)!!!
         log.debug("Lead low from longest suit")
         return suitcards[-1][0]
 

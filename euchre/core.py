@@ -8,7 +8,7 @@ import logging
 import logging.handlers
 import random
 
-from utils import Config
+import utils
 
 ######################
 # Config/Environment #
@@ -19,7 +19,7 @@ BASE_DIR      = os.path.realpath(os.path.join(FILE_DIR, os.pardir))
 CONFIG_DIR    = 'config'
 CONFIG_FILE   = 'config.yml'
 CONFIG_PATH   = os.path.join(BASE_DIR, CONFIG_DIR, CONFIG_FILE)
-cfg           = Config(CONFIG_PATH)
+cfg           = utils.Config(CONFIG_PATH)
 
 param         = cfg.config('params')
 env_param     = {'EUCHREDEBUG': 'debug'}
@@ -151,15 +151,15 @@ validate_basedata(CARDS)
 # Table Seats #
 ###############
 
-west        = {'idx': 0, 'name': 'west',  'tag': 'W'}
-north       = {'idx': 1, 'name': 'north', 'tag': 'N'}
-east        = {'idx': 2, 'name': 'east',  'tag': 'E'}
-south       = {'idx': 3, 'name': 'south', 'tag': 'S'}
+west        = {'idx': 0, 'name': 'West',  'tag': 'W'}
+north       = {'idx': 1, 'name': 'North', 'tag': 'N'}
+east        = {'idx': 2, 'name': 'East',  'tag': 'E'}
+south       = {'idx': 3, 'name': 'South', 'tag': 'S'}
 
 SEATS       = [west, north, east, south]
 
-east_west   = {'idx': 0, 'name': 'east/west',   'tag': 'E/W'}
-north_south = {'idx': 1, 'name': 'north/south', 'tag': 'N/S'}
+east_west   = {'idx': 0, 'name': 'East/West',   'tag': 'E/W'}
+north_south = {'idx': 1, 'name': 'North/South', 'tag': 'N/S'}
 
 TEAMS       = [east_west, north_south]
 

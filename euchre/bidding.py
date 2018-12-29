@@ -1,10 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import random
-
-from core import log, SUITS
-
 def bid(hand):
     """
     :return: suit or None (meaning "pass")

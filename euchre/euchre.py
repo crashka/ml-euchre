@@ -6,28 +6,84 @@ import os.path
 import logging
 import logging.handlers
 import random
+import types
 
 from core import param, log, dbg_hand, RANKS, SUITS, CARDS, SEATS, TEAMS, LogicError
 from hand import Card, Hand
-import bidding
-import playing
+
+###################
+# Constants, etc. #
+###################
+
+MATCH_GAMES_DFLT = 2
+GAME_POINTS_DFLT = 10
 
 #########
 # Match #
 #########
 
-MATCH_GAMES_DFLT = 2
-
 class Match(object):
     """Represents a set of games (race to 2, by default) played by two teams
     """
-    def __init__(self, match_games = MATCH_GAMES_DFLT):
+    def __init__(self, bidding, playing, match_games = MATCH_GAMES_DFLT,
+                 game_points = GAME_POINTS_DFLT):
         """
         """
+        if isinstance(bidding, (list, tuple)):
+            if type(playing) != type(bidding) or len(playing) != len(bidding):
+                raise LogicError("playing and bidding must be same type and size")
+            rep = len(bidding) // 4
+            self.bidding = bidding * rep
+            self.playing = playing * rep
+        else:
+            if not isinstance(bidding, types.ModuleType) or \
+               not isinstance(bidding, types.ModuleType):
+                raise LogicError("playing and bidding must be modules (if scalar)")
+            self.bidding = [bidding] * 4
+            self.playing = [playing] * 4
+
         self.match_games = match_games
+        self.game_points = game_points
         self.games       = []
-        self.curdealer   = None
         self.curgame     = None
+        self.games_won   = [0, 0]
+        self.stats       = None  # later
+
+    def newgame(self):
+        """
+        :return: new Game instance
+        """
+        self.curgame = Game(self)
+        self.games.append(self.curgame)
+        return self.curgame
+
+    def update_score(self):
+        """Update score based on completed game (self.curgame), called by Game.update_score
+        """
+        pass
+
+    def update_stats(self):
+        """
+        """
+        pass
+
+########
+# Game #
+########
+
+class Game(object):
+    """
+    """
+    def __init__(self, match, game_points = None):
+        """
+        """
+        self.match       = match
+        self.game_points = game_points if game_points else match.game_points
+        self.deals       = []
+        self.curdealer   = None
+        self.curdeal     = None
+        self.deals_won   = [0, 0]
+        self.stats       = None  # later
 
     def nextdealer(self):
         """
@@ -48,44 +104,22 @@ class Match(object):
         """
         return random.choice(SEATS)
 
-    def newgame(self):
-        """
-        :return: new Game instance
-        """
-        self.curgame = Game(self)
-        self.games.append(self.curgame)
-        return self.curgame
-
-########
-# Game #
-########
-
-# TEMP: make this global for now (LATER, can be subordinate to higher-level entities, such as
-# tables, tournaments, etc.)!!!
-MATCH = Match()
-
-class Game(object):
-    """
-    """
-    def __init__(self, match = MATCH):
-        """
-        """
-        self.match     = match
-        self.deals     = []
-        self.curdealer = None
-        self.curdeal   = None
-
     def newdeal(self):
         """
         :return: new Deal instance
         """
-        self.curdealer = self.match.nextdealer()
+        self.curdealer = self.nextdealer()
         self.curdeal = Deal(self)
         self.deals.append(self.curdeal)
         return self.curdeal
 
     def update_score(self):
-        """Update score based on completed deal (self.curdeal)
+        """Update score based on completed deal (self.curdeal), called by Deal.tabulate
+        """
+        pass
+
+    def update_stats(self):
+        """
         """
         pass
 
@@ -136,21 +170,44 @@ class Deal(object):
     def __init__(self, game):
         """
         """
-        self.game     = game
-        self.match    = game.match
-        self.dealer   = game.match.curdealer  # note, this is a seat, not a hand!
-        self.deck     = None  # [cards] -- shuffled
-        self.hands    = None  # [hands] -- ordered by position (0 = first bid, 3 = dealer)
-        self.bury     = None  # [cards] -- len 3 during first round bids, otherwise len 4
-        self.turncard = None  # card
-        self.discard  = None  # card
+        self.game       = game
+        self.match      = game.match
+        self.dealer     = game.curdealer  # note, this is a seat, not a hand!
+        self.deck       = None  # [cards] -- shuffled
+        self.hands      = None  # [hands] -- ordered by position (0 = first bid, 3 = dealer)
+        self.bury       = None  # [cards] -- len 3 during first round bids, otherwise len 4
+        self.turncard   = None  # card
+        self.discard    = None  # card
 
-        self.bids     = None  # [(bidder_hand, bid), ...]
-        self.contract = None  # suit -- (for now...perhaps will be a structure in the future)
-        self.caller   = None  # hand
-        self.plays    = None  # [(player_hand, card), ...]
-        self.tricks   = None  # [(winner_hand, [cards]), ...]
-        self.stats    = None
+        self.bids       = None  # [(bidder_hand, bid), ...]
+        self.contract   = None  # suit -- (for now...perhaps will be a structure in the future)
+        self.caller     = None  # hand
+        self.defender   = None  # hand, only if defending alone
+        self.play_alone = False
+        self.dfnd_alone = False
+        self.plays      = None  # [(player_hand, card), ...]
+        self.tricks     = None  # [(winner_hand, [cards]), ...]
+        self.stats      = None
+        self.replays    = 0
+
+    def reset(self):
+        """Reset all deal state other than deck, so we can replay the deal
+        """
+        self.hands      = None
+        self.bury       = None
+        self.turncard   = None
+        self.discard    = None
+
+        self.bids       = None
+        self.contract   = None
+        self.caller     = None
+        self.defender   = None
+        self.play_alone = False
+        self.dfnd_alone = False
+        self.plays      = None
+        self.tricks     = None
+        self.stats      = None
+        self.replays    += 1
 
     @property
     def dealno(self):
@@ -173,6 +230,8 @@ class Deal(object):
         if bid:
             team_tricks = self.playtricks()
             team_scores = self.tabulate(team_tricks)
+
+        self.update_stats()
 
     def shuffle(self, force = False):
         """
@@ -222,7 +281,7 @@ class Deal(object):
         log.info("Bidding for deal #%d begins" % (self.dealno))
         bidder = self.hands[0]
         while len(self.bids) < 8:
-            bid = bidding.bid(bidder)
+            bid = bidder.bid()
             self.bids.append(bid)
             # REVISIT: None means pass for now, but LATER we may want to always pass back
             # a structure containing insight into bid decision, so we would have to check
@@ -264,7 +323,7 @@ class Deal(object):
                      (bid['name'].capitalize(), TEAMS[bidder.team_idx]['tag']))
 
             for hand in self.hands:
-                hand.set_trump()
+                hand.set_trump(self.contract)
             if len(self.bids) <= 4 and dealer_hand.discard in dealer_hand.cards:
                 raise RuntimeError("Discard should not be in dealer hand")
             if len(self.bids) > 4 and self.turncard in dealer_hand.cards:
@@ -339,21 +398,24 @@ class Deal(object):
             while len(plays) < 4:
                 note = ''
                 winning_card = winning[1]  # just for semantic readability
-                card = playing.play(player, plays, winning)
+                card = player.play(plays, winning)
                 cards.append(card)
                 plays.append((player, card))
-                self.stats.card_seen(card)
-                if not winning_card:
-                    winning = (player, card)
-                    note = ' (currently winning)'
-                else:
-                    if self.cmpcards(cards[0], winning_card, card) > 0:
+                if card:
+                    self.stats.card_seen(card)
+                    if not winning_card:
                         winning = (player, card)
                         note = ' (currently winning)'
-                if len(plays) == 1:
-                    log.info("  %s leads %s%s" % (player.seat['name'], card.tag, note))
+                    else:
+                        if self.cmpcards(cards[0], winning_card, card) > 0:
+                            winning = (player, card)
+                            note = ' (currently winning)'
+                    if len(plays) == 1:
+                        log.info("  %s leads %s%s" % (player.seat['name'], card.tag, note))
+                    else:
+                        log.info("  %s plays %s%s" % (player.seat['name'], card.tag, note))
                 else:
-                    log.info("  %s plays %s%s" % (player.seat['name'], card.tag, note))
+                    log.info("  %s's turn is skipped" % (player.seat['name']))
                 player = player.next
 
             winning_hand = winning[0]  # for readability (as above)
@@ -363,14 +425,14 @@ class Deal(object):
             team_idx = winning_hand.team_idx
             team_tricks[team_idx] += 1
             log.info("%s takes trick #%d with %s (%d-%d)" %
-                     (winning_hand.seat['name'].capitalize(), trick_no, winning_card.tag,
+                     (winning_hand.seat['name'], trick_no, winning_card.tag,
                       team_tricks[team_idx], team_tricks[team_idx ^ 0x01]))
             player = winning_hand
 
         winning_team = TEAMS[0] if team_tricks[0] > team_tricks[1] else TEAMS[1]
         log.info("%s tricks: %d, %s tricks: %d" %
                  (TEAMS[0]['tag'], team_tricks[0], TEAMS[1]['tag'], team_tricks[1]))
-        log.info("%s wins deal #%d" % (winning_team['name'].title(), self.dealno))
+        log.info("%s wins deal #%d" % (winning_team['name'], self.dealno))
         return team_tricks
 
     def tabulate(self, team_tricks):
@@ -389,9 +451,21 @@ class Deal(object):
         else:
             team_scores[defender_idx] += 2
 
-        log.debug("Caller (%s) points: %d" % (TEAMS[caller_idx]['name'].title(),
-                                              team_scores[caller_idx] - team_scores[defender_idx]))
+        ml_features = (len(self.bids) - 1,  # bidder position, 0-7 (3 and 7 are dealer)
+                       int(self.play_alone),
+                       *self.caller.features(self.contract),
+                       tricks_made)
+
+        # notes, these are not game points, just relative to calling team for the deal
+        caller_points = team_scores[caller_idx] - team_scores[defender_idx]
+        log.debug("Caller (%s) points: %d" % (TEAMS[caller_idx]['name'], caller_points))
+        print("ML features: %s" % (list(ml_features)))
         return team_scores
+
+    def update_stats(self):
+        """
+        """
+        pass
 
     def log_info(self, *what):
         """
@@ -419,12 +493,19 @@ class Deal(object):
 # Testing #
 ###########
 
+import bidding
+import playing
+
+# TEMP: make this global for now (LATER, can be subordinate to higher-level entities, such as
+# tables, tournaments, etc.)!!!
+MATCH = Match(bidding, playing)
+
 def test(seed = None, ndeals = 1):
     if seed:
         random.seed(seed)
 
     g = MATCH.newgame()
-    for i in range(0, ndeals):
+    for i in range(ndeals):
         d = g.newdeal()
         d.play()
 

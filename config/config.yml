@@ -6,20 +6,20 @@ default:
     west:
       name:         'Addie'
       strategy:
-        bid_class:  null
-        play_class: null
+        bid_module:  null
+        play_module: null
     north:
       name:         'Bradley'
       strategy:
-        bid_class:  null
-        play_class: null
+        bid_module:  null
+        play_module: null
     south:
       name:         'Cyrus'
       strategy:
-        bid_class:  null
-        play_class: null
+        bid_module:  null
+        play_module: null
     east:
       name:         'Dhalia'
       strategy:
-        bid_class:  null
-        play_class: null
+        bid_module:  null
+        play_module: null
