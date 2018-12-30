@@ -2,7 +2,6 @@
 # -*- coding: utf-8 -*-
 
 from core import log, TEAMS, SUITS, ALLRANKS, ace, king, queen, jack, ten, nine, right, left
-from utils import prettyprint as pp
 
 ########
 # Card #
@@ -33,6 +32,9 @@ class Card(object):
             # this is best formula (could also close up gap one way or the other)--
             # would be cool to validate this against ML models at some point!!!
             self.efflevel[suit_idx] -= 1
+            self.efflevel[opp_idx] -= 1
+        elif self.rank == ace:
+            self.efflevel[opp_idx] -= 1
 
     def __getattr__(self, key):
         try:
@@ -66,13 +68,14 @@ class Card(object):
 
 # TEMP: for now, hardwire value for off-suit aces and voids, as equated with
 # a trump suit card value!!!
-OFF_ACE_VALUE   = queen['level']
+OFF_ACE_VALUE   = king['level']
 VOID_SUIT_VALUE = queen['level']
-BID_THRESHOLD   = right['level'] + left['level'] + ten['level'] + OFF_ACE_VALUE
-DEALER_VALUE    = ten['level']
 
 class HandAnaly(object):
     """Analysis for a hand and specified trump suit
+
+    TODO: need to transition this class into the bidding module, to keep the Hand
+    class/module as unopinionated (relative to strategy) as possible!!!
     """
     def __init__(self, cards, trump):
         self.cards        = cards
@@ -80,11 +83,11 @@ class HandAnaly(object):
 
         self.suitcount    = [0, 0, 0, 0]
         self.suitcards    = [[], [], [], []]
-        self.trump_score  = [None] * 2
-        self.next_score   = [None] * 2
-        self.green_score  = [None] * 2
+        self.trump_score  = None
+        self.next_score   = None
+        self.green_score  = None
         # purple is the weaker off-color suit
-        self.purple_score = [None] * 2
+        self.purple_score = None
         self.green_swap   = False  # true if green and purple scores are swapped
         self.trumps       = None
         self.aces         = 0      # only count off-aces
@@ -147,14 +150,10 @@ class HandAnaly(object):
         nxt_cards = self.suitcards[nxt_idx]
         grn_cards = self.suitcards[grn_idx]
         pur_cards = self.suitcards[pur_idx]
-        self.trump_score[0]  = sum(c.efflevel[tru_idx]    for c in tru_cards)
-        self.trump_score[1]  = sum(c.efflevel[tru_idx]**2 for c in tru_cards)
-        self.next_score[0]   = sum(c.efflevel[tru_idx]    for c in nxt_cards)
-        self.next_score[1]   = sum(c.efflevel[tru_idx]**2 for c in nxt_cards)
-        self.green_score[0]  = sum(c.efflevel[tru_idx]    for c in grn_cards)
-        self.green_score[1]  = sum(c.efflevel[tru_idx]**2 for c in grn_cards)
-        self.purple_score[0] = sum(c.efflevel[tru_idx]    for c in pur_cards)
-        self.purple_score[1] = sum(c.efflevel[tru_idx]**2 for c in pur_cards)
+        self.trump_score  = sum(c.efflevel[tru_idx]    for c in tru_cards)
+        self.next_score   = sum(c.efflevel[tru_idx]    for c in nxt_cards)
+        self.green_score  = sum(c.efflevel[tru_idx]    for c in grn_cards)
+        self.purple_score = sum(c.efflevel[tru_idx]    for c in pur_cards)
 
         # aggregation for top trump card scores (idx 0 = top trump, idx 1 = second high, etc.)
         for idx in range(len(tru_cards)):
@@ -162,16 +161,15 @@ class HandAnaly(object):
             for idx2 in range(idx, len(self.cards)):
                 self.top_trump_scores[idx2] += tru_cards[card_idx].efflevel[tru_idx]
 
-        # REVISIT: currently swap green and purple scores based on score[0], but
-        # could/should it be something else (e.g. score[1])???
-        if self.purple_score[0] > self.green_score[0]:
-            self.green_score[0], self.purple_score[0] = self.purple_score[0], self.green_score[0]
-            self.green_score[1], self.purple_score[1] = self.purple_score[1], self.green_score[1]
+        # REVISIT: currently swap green and purple scores based on "score", but could
+        # (or should) it be something else???
+        if self.purple_score > self.green_score:
+            self.green_score, self.purple_score = self.purple_score, self.green_score
             self.green_swap = True
 
         # NOTE: penalty/reward for deliverying the trump into opponent or partner hand is
         # included in the hand analysis below
-        self.hand_score = self.trump_score[0] + \
+        self.hand_score = self.trump_score + \
                           self.trumps * 2 + \
                           self.voids * VOID_SUIT_VALUE + \
                           self.aces * OFF_ACE_VALUE
@@ -250,9 +248,6 @@ class Hand(object):
     def card_tags_by_suit(self):
         return [[c.tag for c in s] for s in self.suitcards]
 
-    def is_partner(self, other):
-        return other == self.partner
-
     @property
     def next(self):
         return self.deal.hands[self.next_pos]
@@ -261,38 +256,8 @@ class Hand(object):
     def partner(self):
         return self.deal.hands[self.partner_pos]
 
-    def features(self, suit):
-        """Return tuple of features based on suit bid, for training and predicting
-
-        * Level of turncard (1-8)
-        * Relative suit of turncard (in relation to trump)
-           * One-hot encoding for next, green, or purple (all zeros if turncard picked up)
-        * Trump (turncard or called) suit strength (various measures, start with sum of levels 1-8)
-           * Top 1, 2, and 3 trump cards (three aggregate values)
-           * Note: include turncard and exclude discard, if dealer (which implies that model
-             will be tied to discard algorithm)
-        * Trump/next/green/purple suit scores (instead of just trump strength?)
-        * Number of trump (with turncard/discard, if dealer)
-        * Number of voids (or suits)
-        * Number of off-aces
-
-        :return: tuple (see above for elements)
-        """
-        suit_idx = suit['idx']
-        hand_anl = self.analysis[suit_idx]
-        turnsuit = self.turncard.suit
-        one_hot_rel_suits = tuple(int(turnsuit == s) for s in hand_anl.rel_suits)
-        top_trump_scores = tuple(hand_anl.top_trump_scores[:3])
-        return (self.turncard.level,
-                *one_hot_rel_suits,
-                *top_trump_scores,
-                hand_anl.trump_score[0],
-                hand_anl.next_score[0],
-                hand_anl.green_score[0],
-                hand_anl.purple_score[0],
-                hand_anl.suitcount[suit_idx],
-                hand_anl.voids,
-                hand_anl.aces)
+    def is_partner(self, other):
+        return other == self.partner
 
     def analyze(self, turncard, reanalyze = False):
         """
@@ -318,7 +283,7 @@ class Hand(object):
                 newcards.append(turncard)
                 # note that the following may actually return the turncard, e.g. if it
                 # would be the lowest trump (or perhaps some wacky other reason)
-                discard = self.bestdiscard(turncard)
+                discard = self.bidding.discard(self, turncard)
                 newcards.remove(discard)
                 log.trace("Reanalyzing dealer hand with turncard (%s) and discard (%s)" %
                           (turncard.tag, discard.tag))
@@ -326,93 +291,10 @@ class Hand(object):
                 self.discard = discard
                 self.analysis[turncard.suit['idx']] = reanalysis
 
-    def bestdiscard(self, turncard):
-        """
-        """
-        trump = turncard.suit
-        tru_idx = trump['idx']
-        nxt_idx = tru_idx ^ 0x03
-        hand_anl = self.analysis[tru_idx]
-        suitcount = hand_anl.suitcount
-        suitcards = hand_anl.suitcards
-
-        # Handle all trump case (get it out of the way)
-        if suitcount[tru_idx] == len(self.cards):
-            discard = min(suitcards[tru_idx][0], turncard, key=lambda c: c.level)
-            log.debug("Discard %s if %s trump, lowest trump" % (discard.tag, trump['tag']))
-            return discard
-
-        # Create void if possible
-        if suitcount.count(1) > 0:
-            mincard = None
-            minlevel = 10
-            for idx in range(len(suitcount)):
-                if idx == tru_idx or suitcount[idx] != 1:
-                    continue
-                # for now, we just pick the first card found at the lowest level
-                # LATER: favor voiding next or green, depending on opponent tendencies
-                # (always void next if loner called from pos = 2)!!!
-                if suitcards[idx][0].level < minlevel and suitcards[idx][0].rank != ace:
-                    mincard = suitcards[idx][0]
-                    minlevel = mincard.level
-            if mincard:
-                log.debug("Discard %s if %s trump, voiding suit" % (mincard.tag, trump['tag']))
-                return mincard
-
-        # Create doubletons, if possible (favor over creating singletons)
-        if suitcount.count(3) > 0:
-            idx = suitcount.index(3)
-            # REVISIT: perhaps only do if high card in suit is actually viable (like
-            # queen or higher)!!!
-            if idx != tru_idx:
-                # note that first element is the loweest (cards sorted ascending)
-                discard = suitcards[idx][0]
-                log.debug("Discard %s if %s trump, creating doubleton" % (discard.tag, trump['tag']))
-                return discard
-
-        # Discard next if loner call from third seat (REVISIT: not sure it makes sense
-        # to extend this to the general, non-voiding, non-third-seat-loner case!!!)
-        if suitcount[nxt_idx] == 2:
-            # don't unguard doubleton king or break up A-K
-            if king not in (c.rank for c in suitcards[nxt_idx]):
-                discard = suitcards[nxt_idx][0]
-                log.debug("Discard %s if %s trump, reducing next" % (discard.tag, trump['tag']))
-                return discard
-
-        # Discard lowest card, any suit (last resort)
-        mincard = None
-        minlevel = 10
-        savecards = []  # attempt to preserve, only discard if no alternatives
-        for idx in range(len(suitcards)):
-            if idx == tru_idx:
-                continue
-            # avoid unguarding doubleton king, while making sure that A-K doubleton
-            # takes precedence (if also present)
-            if suitcount[idx] == 2 and king in (c.rank for c in suitcards[idx]):
-                savecards.append(suitcards[idx][0])
-                continue
-            # otherwise we just pick the first card found at the lowest level; chances
-            # are that there is no other meaninful logic to apply here (e.g. choosing
-            # between green suit doubletons)
-            if suitcards[idx] and suitcards[idx][0].level < minlevel:
-                mincard = suitcards[idx][0]
-                minlevel = mincard.level
-        assert mincard or savecards
-        if not mincard:
-            mincard = min(savecards, key=lambda c: c.level)
-            log.debug("Have to unguard doubleton king or discard from A-K, oh well...")
-        log.debug("Discard %s if %s trump, lowest card" % (mincard.tag, trump['tag']))
-        return mincard
-
     def bid(self):
         """
         """
         return self.bidding.bid(self)
-
-    def play(self, plays, winning):
-        """
-        """
-        return self.playing.play(self, plays, winning)
 
     def set_trump(self, trump):
         """
@@ -421,19 +303,10 @@ class Hand(object):
         """
         self.trump = trump
         tru_idx = self.trump['idx']
+        # TODO: dissociate from self.analysis!!!
         self.cards = self.analysis[tru_idx].cards.copy()
         self.suitcards = self.analysis[tru_idx].suitcards.copy()
         self.cards.sort(key=lambda c: c.suit['idx'] * len(ALLRANKS) + c.level)
-
-    def play_card(self, card):
-        """
-        :param card: Card (must be in hand)
-        :return: card (for convenience, chaining, etc.)
-        """
-        suit_idx = card.suit['idx']
-        self.cards.remove(card)
-        self.suitcards[suit_idx].remove(card)
-        return card
 
     @property
     def has_bower(self):
@@ -477,33 +350,53 @@ class Hand(object):
         return [scs[-1] for scs in self.suitcards
                 if scs and scs[-1].rank == ace and scs[-1].suit != self.trump]
 
-    def bestsuit(self, exclude = None):
+    def play(self, plays, winning):
         """
-        :return: suit (dict)
         """
-        suits = SUITS.copy()
-        if exclude:
-            del suits[exclude['idx']]
-        # TODO: add tie-breaker in the case of equal scores!!!
-        return max(suits, key=lambda s: self.analysis[s['idx']].hand_score)
+        return self.playing.play(self, plays, winning)
 
-    def biddable(self, trump, round):
+    def play_card(self, card):
         """
-        TEMP TEMP TEMP: this is just a stand-in for dev purposes!!!!!!!
-        :param trump: dict
-        :param round: int
-        :return: bool
+        :param card: Card (must be in hand)
+        :return: card (for convenience, chaining, etc.)
         """
-        idx = trump['idx']
-        thresh = BID_THRESHOLD
-        if self.pos == 3 and round == 1:
-            # NOTE: this is currently not built into hand_score
-            thresh -= DEALER_VALUE
-        elif round == 2:
-            thresh -= self.pos  # or whatever...
-        log.debug("  Hand score: %d (with %s as trump), threshold: %d" %
-                  (self.analysis[idx].hand_score, trump['tag'], thresh))
-        return self.analysis[idx].hand_score > thresh
+        suit_idx = card.suit['idx']
+        self.cards.remove(card)
+        self.suitcards[suit_idx].remove(card)
+        return card
+
+    def features(self, suit):
+        """Return tuple of features based on suit bid, for training and predicting
+
+        * Level of turncard (1-8)
+        * Relative suit of turncard (in relation to trump)
+           * One-hot encoding for next, green, or purple (all zeros if turncard picked up)
+        * Trump (turncard or called) suit strength (various measures, start with sum of levels 1-8)
+           * Top 1, 2, and 3 trump cards (three aggregate values)
+           * Note: include turncard and exclude discard, if dealer (which implies that model
+             will be tied to discard algorithm)
+        * Trump/next/green/purple suit scores (instead of just trump strength?)
+        * Number of trump (with turncard/discard, if dealer)
+        * Number of voids (or suits)
+        * Number of off-aces
+
+        :return: tuple (see above for elements)
+        """
+        suit_idx = suit['idx']
+        hand_anl = self.analysis[suit_idx]
+        turnsuit = self.turncard.suit
+        one_hot_rel_suits = tuple(int(turnsuit == s) for s in hand_anl.rel_suits)
+        top_trump_scores = tuple(hand_anl.top_trump_scores[:3])
+        return (self.turncard.level,
+                *one_hot_rel_suits,
+                *top_trump_scores,
+                hand_anl.trump_score,
+                hand_anl.next_score,
+                hand_anl.green_score,
+                hand_anl.purple_score,
+                hand_anl.suitcount[suit_idx],
+                hand_anl.voids,
+                hand_anl.aces)
 
 ###########
 # Testing #

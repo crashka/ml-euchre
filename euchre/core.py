@@ -35,7 +35,7 @@ LOG_DIR      = 'log'
 LOG_FILE     = LOGGER_NAME + '.log'
 LOG_PATH     = os.path.join(BASE_DIR, LOG_DIR, LOG_FILE)
 LOG_FMTR     = logging.Formatter('%(asctime)s %(levelname)s [%(filename)s:%(lineno)s]: %(message)s')
-LOG_FILE_MAX = 50000000
+LOG_FILE_MAX = 25000000
 LOG_FILE_NUM = 50
 
 dflt_hand = logging.handlers.RotatingFileHandler(LOG_PATH, 'a', LOG_FILE_MAX, LOG_FILE_NUM)
