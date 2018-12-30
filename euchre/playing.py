@@ -56,17 +56,18 @@ def play(hand, plays, winning):
 
     def next_call_lead():
         """Especially if calling with weaker hand...
+
         * The best first lead on a next call is a small trump, this is especially
-           true if you hold an off-suit Ace. By leading a small trump you stand the
-           best chance of hitting your partner's hand. Remember, the odds are that
-           he will have at least one bower in his hand
+          true if you hold an off-suit Ace. By leading a small trump you stand the
+          best chance of hitting your partner's hand. Remember, the odds are that
+          he will have at least one bower in his hand
         * Leading the right may not be the best move. Your partner may only have
-           one bower in his hand and you don't want them to clash. When you are
-           holding a right/ace combination it's usually best to lead the ace. If
-           the other bower has been turned down, then it is okay to lead the right.
+          one bower in his hand and you don't want them to clash. When you are
+          holding a right/ace combination it's usually best to lead the ace. If
+          the other bower has been turned down, then it is okay to lead the right.
         * In a hand where you only hold two small cards in next but no power, try
           leading an off suit that you think your partner may be able to trump.
-           You may need the trump to make your point.
+          You may need the trump to make your point.
         * If your partner calls next and leads a trump, DO NOT lead trump back.
         """
         if deal.is_next_call:
@@ -341,26 +342,26 @@ def play(hand, plays, winning):
                     throw_off_low,
                     play_random_card]
 
-    def apply(strategy):
+    def apply(ruleset):
         """
         """
         res = None
-        for rule in strategy:
+        for rule in ruleset:
             res = rule()
             if res:
                 break
         if not res:
-            raise LogicError("Strategy did not produce valid result")
+            raise LogicError("Ruleset did not produce valid result")
         return res
 
-    ##########################
-    # pick strategy and play #
-    ##########################
+    #########################
+    # pick ruleset and play #
+    #########################
 
     if not plays:
-        play_strategy = init_lead if trick_no == 1 else subseq_lead
+        ruleset = init_lead if trick_no == 1 else subseq_lead
     else:
         cur_winning = hand.is_partner(winning[0])
-        play_strategy = part_winning if cur_winning else opp_winning
+        ruleset = part_winning if cur_winning else opp_winning
 
-    return hand.play_card(apply(play_strategy))
+    return hand.play_card(apply(ruleset))

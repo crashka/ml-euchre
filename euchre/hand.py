@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from core import log, TEAMS, SUITS, ALLRANKS, ace, king, queen, jack, right, left, LogicError
+from core import log, TEAMS, SUITS, ALLRANKS, ace, king, queen, jack, ten, nine, right, left
 from utils import prettyprint as pp
 
 ########
@@ -68,8 +68,8 @@ class Card(object):
 # a trump suit card value!!!
 OFF_ACE_VALUE   = queen['level']
 VOID_SUIT_VALUE = queen['level']
-BID_THRESHOLD   = right['level'] + left['level'] + OFF_ACE_VALUE
-DEALER_VALUE    = queen['level']
+BID_THRESHOLD   = right['level'] + left['level'] + ten['level'] + OFF_ACE_VALUE
+DEALER_VALUE    = ten['level']
 
 class HandAnaly(object):
     """Analysis for a hand and specified trump suit
@@ -169,11 +169,10 @@ class HandAnaly(object):
             self.green_score[1], self.purple_score[1] = self.purple_score[1], self.green_score[1]
             self.green_swap = True
 
-        # TODO: hand score should take into account the turncard--penalty/reward
-        # for deliverying the trump into opponent or partner hand, or included in
-        # the computation for dealer hand (related to selecting discard, below)!!!
+        # NOTE: penalty/reward for deliverying the trump into opponent or partner hand is
+        # included in the hand analysis below
         self.hand_score = self.trump_score[0] + \
-                          self.trumps + \
+                          self.trumps * 2 + \
                           self.voids * VOID_SUIT_VALUE + \
                           self.aces * OFF_ACE_VALUE
 
@@ -303,12 +302,15 @@ class Hand(object):
                       ("Rea" if reanalyze else "A", self.seat['name'], self.card_tags))
             self.turncard = turncard  # not currently used for non-dealer
             self.analysis = [HandAnaly(self.cards, s) for s in SUITS]
+            # penalty/reward for ordering trump into dealer hand (note, this should be
+            # pushed into HandAnaly, one way or another!)
+            turn_idx = turncard.suit['idx']
             if self.pos in (0, 2):
-                # penalty for ordering trump into dealer hand (note, this should be
-                # pushed into HandAnaly, one way or another!)
-                turn_idx = turncard.suit['idx']
                 penalty = turncard.efflevel[turn_idx] // 2
                 self.analysis[turn_idx].hand_score -= penalty
+            elif self.pos == 1:
+                reward = turncard.efflevel[turn_idx] // 2
+                self.analysis[turn_idx].hand_score += reward
 
             # fix up dealer hand based on turncard
             if self.pos == 3:
@@ -337,7 +339,7 @@ class Hand(object):
         # Handle all trump case (get it out of the way)
         if suitcount[tru_idx] == len(self.cards):
             discard = min(suitcards[tru_idx][0], turncard, key=lambda c: c.level)
-            log.trace("Discard %s if %s trump, lowest trump" % (discard.tag, trump['tag']))
+            log.debug("Discard %s if %s trump, lowest trump" % (discard.tag, trump['tag']))
             return discard
 
         # Create void if possible
@@ -354,7 +356,7 @@ class Hand(object):
                     mincard = suitcards[idx][0]
                     minlevel = mincard.level
             if mincard:
-                log.trace("Discard %s if %s trump, voiding suit" % (mincard.tag, trump['tag']))
+                log.debug("Discard %s if %s trump, voiding suit" % (mincard.tag, trump['tag']))
                 return mincard
 
         # Create doubletons, if possible (favor over creating singletons)
@@ -365,7 +367,7 @@ class Hand(object):
             if idx != tru_idx:
                 # note that first element is the loweest (cards sorted ascending)
                 discard = suitcards[idx][0]
-                log.trace("Discard %s if %s trump, creating doubleton" % (discard.tag, trump['tag']))
+                log.debug("Discard %s if %s trump, creating doubleton" % (discard.tag, trump['tag']))
                 return discard
 
         # Discard next if loner call from third seat (REVISIT: not sure it makes sense
@@ -374,7 +376,7 @@ class Hand(object):
             # don't unguard doubleton king or break up A-K
             if king not in (c.rank for c in suitcards[nxt_idx]):
                 discard = suitcards[nxt_idx][0]
-                log.trace("Discard %s if %s trump, reducing next" % (discard.tag, trump['tag']))
+                log.debug("Discard %s if %s trump, reducing next" % (discard.tag, trump['tag']))
                 return discard
 
         # Discard lowest card, any suit (last resort)
@@ -398,8 +400,8 @@ class Hand(object):
         assert mincard or savecards
         if not mincard:
             mincard = min(savecards, key=lambda c: c.level)
-            log.trace("Have to unguard doubleton king or discard from A-K, oh well...")
-        log.trace("Discard %s if %s trump, lowest card" % (mincard.tag, trump['tag']))
+            log.debug("Have to unguard doubleton king or discard from A-K, oh well...")
+        log.debug("Discard %s if %s trump, lowest card" % (mincard.tag, trump['tag']))
         return mincard
 
     def bid(self):

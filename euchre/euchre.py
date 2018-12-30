@@ -8,7 +8,7 @@ import logging.handlers
 import random
 import types
 
-from core import param, log, dbg_hand, RANKS, SUITS, CARDS, SEATS, TEAMS, LogicError
+from core import log, RANKS, SUITS, CARDS, SEATS, TEAMS, LogicError
 from hand import Card, Hand
 
 ###################
@@ -29,6 +29,9 @@ class Match(object):
                  game_points = GAME_POINTS_DFLT):
         """
         """
+        # NOTE: for now, bidding/playing are passed in as modules, but later they
+        # will be Bidding and Playing (or subclass) objects, instantiated with
+        # parameters from config file
         if isinstance(bidding, (list, tuple)):
             if type(playing) != type(bidding) or len(playing) != len(bidding):
                 raise LogicError("playing and bidding must be same type and size")
@@ -37,7 +40,7 @@ class Match(object):
             self.playing = playing * rep
         else:
             if not isinstance(bidding, types.ModuleType) or \
-               not isinstance(bidding, types.ModuleType):
+               not isinstance(playing, types.ModuleType):
                 raise LogicError("playing and bidding must be modules (if scalar)")
             self.bidding = [bidding] * 4
             self.playing = [playing] * 4
@@ -47,6 +50,7 @@ class Match(object):
         self.games       = []
         self.curgame     = None
         self.games_won   = [0, 0]
+        self.winner      = None  # team
         self.stats       = None  # later
 
     def newgame(self):
@@ -55,12 +59,25 @@ class Match(object):
         """
         self.curgame = Game(self)
         self.games.append(self.curgame)
+        log.info("===== New Game, #%d =====" % (len(self.games)))
         return self.curgame
 
-    def update_score(self):
+    def update_score(self, team_games):
         """Update score based on completed game (self.curgame), called by Game.update_score
         """
-        pass
+        for idx in range(2):
+            if team_games[idx] > 0:
+                assert team_games[idx^0x01] == 0
+                self.games_won[idx] += team_games[idx]
+                if self.games_won[idx] >= self.match_games:
+                    self.winner = TEAMS[idx]
+                    log.info("%s wins match, games: %d-%d" %
+                             (TEAMS[idx]['name'], self.games_won[idx], self.games_won[idx^0x01]))
+                    return
+
+        idx = 0 if self.games_won[0] > self.games_won[1] else 1
+        log.info("%s leads match, games: %d-%d" %
+                 (TEAMS[idx]['name'], self.games_won[idx], self.games_won[idx^0x01]))
 
     def update_stats(self):
         """
@@ -82,7 +99,8 @@ class Game(object):
         self.deals       = []
         self.curdealer   = None
         self.curdeal     = None
-        self.deals_won   = [0, 0]
+        self.score       = [0, 0]  # points by team
+        self.winner      = None  # team
         self.stats       = None  # later
 
     def nextdealer(self):
@@ -113,10 +131,25 @@ class Game(object):
         self.deals.append(self.curdeal)
         return self.curdeal
 
-    def update_score(self):
+    def update_score(self, team_points):
         """Update score based on completed deal (self.curdeal), called by Deal.tabulate
         """
-        pass
+        for idx in range(2):
+            if team_points[idx] > 0:
+                assert team_points[idx^0x01] == 0
+                self.score[idx] += team_points[idx]
+                if self.score[idx] >= self.game_points:
+                    self.winner = TEAMS[idx]
+                    log.info("%s wins game #%d, score: %d-%d" %
+                             (TEAMS[idx]['name'], len(self.match.games),
+                              self.score[idx], self.score[idx^0x01]))
+                    self.match.update_score([int(bool(pts)) for pts in team_points])
+                    return
+
+        idx = 0 if self.score[0] > self.score[1] else 1
+        log.info("%s leads game #%d, score: %d-%d" %
+                 (TEAMS[idx]['name'], len(self.match.games),
+                  self.score[idx], self.score[idx^0x01]))
 
     def update_stats(self):
         """
@@ -187,6 +220,8 @@ class Deal(object):
         self.dfnd_alone = False
         self.plays      = None  # [(player_hand, card), ...]
         self.tricks     = None  # [(winner_hand, [cards]), ...]
+        self.score      = [0, 0]  # tricks won, by team
+        self.winner     = None
         self.stats      = None
         self.replays    = 0
 
@@ -206,6 +241,8 @@ class Deal(object):
         self.dfnd_alone = False
         self.plays      = None
         self.tricks     = None
+        self.score      = [0, 0]
+        self.winner     = None
         self.stats      = None
         self.replays    += 1
 
@@ -220,6 +257,9 @@ class Deal(object):
         """
         :return: void
         """
+        if self.game.winner:
+            raise RuntimeError("Cannot deal when game is already over (winner: %s)" %
+                               (self.game.winner['name']))
         # shuffle and deal
         self.log_info('header')
         self.shuffle()
@@ -228,8 +268,8 @@ class Deal(object):
         # bidding and playing tricks
         bid = self.bid()
         if bid:
-            team_tricks = self.playtricks()
-            team_scores = self.tabulate(team_tricks)
+            self.playtricks()
+            self.tabulate()
 
         self.update_stats()
 
@@ -387,7 +427,6 @@ class Deal(object):
         """
         :return: score [E/W tricks, N/S tricks]
         """
-        team_tricks = [0, 0]
         player  = self.hands[0]
         while len(self.tricks) < 5:
             plays    = []            # [(player_hand, card), ...]
@@ -423,44 +462,40 @@ class Deal(object):
             self.plays += plays
             self.tricks.append((winning_hand, cards))
             team_idx = winning_hand.team_idx
-            team_tricks[team_idx] += 1
+            self.score[team_idx] += 1
             log.info("%s takes trick #%d with %s (%d-%d)" %
                      (winning_hand.seat['name'], trick_no, winning_card.tag,
-                      team_tricks[team_idx], team_tricks[team_idx ^ 0x01]))
+                      self.score[team_idx], self.score[team_idx ^ 0x01]))
             player = winning_hand
 
-        winning_team = TEAMS[0] if team_tricks[0] > team_tricks[1] else TEAMS[1]
-        log.info("%s tricks: %d, %s tricks: %d" %
-                 (TEAMS[0]['tag'], team_tricks[0], TEAMS[1]['tag'], team_tricks[1]))
-        log.info("%s wins deal #%d" % (winning_team['name'], self.dealno))
-        return team_tricks
-
-    def tabulate(self, team_tricks):
+    def tabulate(self):
         """
         :return: void
         """
-        team_scores  = [0, 0]
+        team_points  = [0, 0]
         caller_idx   = self.caller.team_idx
         defender_idx = caller_idx ^ 0x01
-        tricks_made  = team_tricks[caller_idx]
+        tricks_made  = self.score[caller_idx]
 
         if tricks_made >= 3:
-            team_scores[caller_idx] += 1
+            self.winner = TEAMS[caller_idx]
+            team_points[caller_idx] += 1
             if tricks_made == 5:
-                team_scores[caller_idx] += 1
+                team_points[caller_idx] += 1
+            log.info("%s wins deal #%d (makes contract), tricks: %d-%d, +%d points" %
+                     (TEAMS[caller_idx]['name'], self.dealno, self.score[caller_idx],
+                      self.score[defender_idx], team_points[caller_idx]))
         else:
-            team_scores[defender_idx] += 2
+            self.winner = TEAMS[defender_idx]
+            team_points[defender_idx] += 2
+            log.info("%s wins deal #%d (euchre!), tricks: %d-%d, +%d points" %
+                     (TEAMS[defender_idx]['name'], self.dealno, self.score[defender_idx],
+                      self.score[caller_idx], team_points[defender_idx]))
 
-        ml_features = (len(self.bids) - 1,  # bidder position, 0-7 (3 and 7 are dealer)
-                       int(self.play_alone),
-                       *self.caller.features(self.contract),
-                       tricks_made)
-
+        self.game.update_score(team_points)
         # notes, these are not game points, just relative to calling team for the deal
-        caller_points = team_scores[caller_idx] - team_scores[defender_idx]
-        log.debug("Caller (%s) points: %d" % (TEAMS[caller_idx]['name'], caller_points))
-        print("ML features: %s" % (list(ml_features)))
-        return team_scores
+        #caller_points = team_points[caller_idx] - team_points[defender_idx]
+        #log.debug("Caller (%s) points: %d" % (TEAMS[caller_idx]['name'], caller_points))
 
     def update_stats(self):
         """
@@ -493,27 +528,61 @@ class Deal(object):
 # Testing #
 ###########
 
+import click
 import bidding
 import playing
+
+from core import param, dflt_hand, dbg_hand
+import utils
 
 # TEMP: make this global for now (LATER, can be subordinate to higher-level entities, such as
 # tables, tournaments, etc.)!!!
 MATCH = Match(bidding, playing)
 
-def test(seed = None, ndeals = 1):
+@click.command()
+@click.option('--seed',   '-s', default=None, type=int, help="Seed for random module")
+@click.option('--ndeals', '-n', default=None, type=int, help="Number of deals")
+@click.option('--debug',  '-d', default=0, help="Debug level")
+def test(seed, ndeals, debug):
+    """Play a single game, print out ML features
+    """
+    debug = debug or int(param.get('debug') or 0)
+    if debug > 0:
+        log.setLevel(utils.TRACE if debug > 1 else logging.DEBUG)
+        dflt_hand.setLevel(utils.TRACE if debug > 1 else logging.DEBUG)
+        #dbg_hand.setLevel(utils.TRACE if debug > 1 else logging.DEBUG)
+        #log.addHandler(dbg_hand)
+
     if seed:
         random.seed(seed)
 
     g = MATCH.newgame()
-    for i in range(ndeals):
+    for i in range(ndeals or 1000):
         d = g.newdeal()
         d.play()
+        if not d.winner:
+            print("Deal passed")
+            continue
+
+        caller_idx   = d.caller.team_idx
+        tricks_made  = d.score[caller_idx]
+        ml_features = (len(d.bids) - 1,  # bidder position, 0-7 (3 and 7 are dealer)
+                       int(d.play_alone),
+                       *d.caller.features(d.contract),
+                       tricks_made)
+        print("ML features: %s" % (list(ml_features)))
+
+        if g.winner:
+            idx = g.winner['idx']
+            print("%s wins game #%d, score: %d-%d" %
+                  (g.winner['name'], len(MATCH.games), g.score[idx], g.score[idx^0x01]))
+            break
+
+    if not g.winner:
+        print("Score for game #%d: %s %d, %s %d" %
+              (len(MATCH.games), TEAMS[0]['name'], g.score[0], TEAMS[1]['name'], g.score[1]))
+
+    return 0
 
 if __name__ == '__main__':
-    log.addHandler(dbg_hand)
-    if param.get('debug'):
-        log.setLevel(logging.DEBUG)
-
-    # Usage: euchre.py [<seed> [<ndeals>}]
-    prog = sys.argv.pop(0)
-    test(*sys.argv)
+    test()
