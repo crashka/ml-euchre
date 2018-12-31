@@ -62,6 +62,11 @@ class Card(object):
             return self.effsuit[tru_idx]
         return self.base['suit']
 
+    def is_left(self):
+        """
+        """
+        return self.level == left['level']
+
 ########
 # Hand #
 ########
@@ -384,10 +389,16 @@ class Hand(object):
         """
         suit_idx = suit['idx']
         hand_anl = self.analysis[suit_idx]
-        turnsuit = self.turncard.suit
-        one_hot_rel_suits = tuple(int(turnsuit == s) for s in hand_anl.rel_suits)
+
+        if self.turncard.is_left():
+            turn_level = right['level']
+            turn_suit  = self.turncard.base['suit']
+        else:
+            turn_level = self.turncard.level
+            turn_suit  = self.turncard.suit
+        one_hot_rel_suits = tuple(int(turn_suit == s) for s in hand_anl.rel_suits)
         top_trump_scores = tuple(hand_anl.top_trump_scores[:3])
-        return (self.turncard.level,
+        return (turn_level,
                 *one_hot_rel_suits,
                 *top_trump_scores,
                 hand_anl.trump_score,
