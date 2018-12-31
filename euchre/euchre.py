@@ -1,16 +1,16 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-import sys
-import os.path
+"""This module contains Match, Game, and Deal classes
+"""
+
 import logging
-import logging.handlers
 import random
 import types
 
 from core import log, RANKS, SUITS, CARDS, SEATS, TEAMS, right, LogicError
 from hand import Card, Hand
-from utils import prettyprint
+from stats import GameStats
 
 ###################
 # Constants, etc. #
@@ -22,79 +22,6 @@ GAME_POINTS_DFLT = 10
 #########
 # Match #
 #########
-
-class MatchStats(object):
-    """
-    """
-    def __init__(self):
-        """
-        """
-        self.npass = 0
-        self.nbid  = 0
-        self.nmake = 0
-        self.nall  = 0
-        self.neuch = 0
-        self.pass_by_card = [0] * 9
-        self.bid_by_card  = [0] * 9
-        self.bid_by_pos   = [0] * 8
-        self.bid_by_seat  = [0] * 4
-        self.bid_by_suit  = [0] * 3
-        self.make_by_card = [0] * 9
-        self.make_by_pos  = [0] * 8
-        self.make_by_seat = [0] * 4
-        self.make_by_suit = [0] * 3
-        self.all_by_card  = [0] * 9
-        self.all_by_pos   = [0] * 8
-        self.all_by_seat  = [0] * 4
-        self.all_by_suit  = [0] * 3
-        self.euch_by_card = [0] * 9
-        self.euch_by_pos  = [0] * 8
-        self.euch_by_seat = [0] * 4
-        self.euch_by_suit = [0] * 3
-        self.pts_by_card  = [0] * 9
-        self.pts_by_pos   = [0] * 8
-        self.pts_by_seat  = [0] * 4
-        self.pts_by_suit  = [0] * 3
-        self.tpts_by_card = [0] * 9
-        self.tpts_by_pos  = [0] * 8
-        self.tpts_by_seat = [0] * 4
-        self.tpts_by_suit = [0] * 3
-
-    def log_agg(self, info = None):
-        """
-        """
-        stats_agg = {
-            'pct_make'         : self.nmake / self.nbid * 100.0,
-            'pct_all'          : self.nall  / self.nbid * 100.0,
-            'pct_euch'         : self.neuch / self.nbid * 100.0,
-            'bid_pct_by_card'  : [self.bid_by_card[i]  / self.nbid  * 100.0 for i in range(9)],
-            'bid_pct_by_pos'   : [self.bid_by_pos[i]   / self.nbid  * 100.0 for i in range(8)],
-            'bid_pct_by_seat'  : [self.bid_by_seat[i]  / self.nbid  * 100.0 for i in range(4)],
-            'bid_pct_by_suit'  : [self.bid_by_suit[i]  / self.nbid  * 100.0 for i in range(3)],
-            'make_pct_by_card' : [self.make_by_card[i] / self.nmake * 100.0 for i in range(9)],
-            'make_pct_by_pos'  : [self.make_by_pos[i]  / self.nmake * 100.0 for i in range(8)],
-            'make_pct_by_seat' : [self.make_by_seat[i] / self.nmake * 100.0 for i in range(4)],
-            'make_pct_by_suit' : [self.make_by_suit[i] / self.nmake * 100.0 for i in range(3)],
-            'all_pct_by_card'  : [self.all_by_card[i]  / self.nall  * 100.0 for i in range(9)],
-            'all_pct_by_pos'   : [self.all_by_pos[i]   / self.nall  * 100.0 for i in range(8)],
-            'all_pct_by_seat'  : [self.all_by_seat[i]  / self.nall  * 100.0 for i in range(4)],
-            'all_pct_by_suit'  : [self.all_by_suit[i]  / self.nall  * 100.0 for i in range(3)],
-            'euch_pct_by_card' : [self.euch_by_card[i] / self.neuch * 100.0 for i in range(9)],
-            'euch_pct_by_pos'  : [self.euch_by_pos[i]  / self.neuch * 100.0 for i in range(8)],
-            'euch_pct_by_seat' : [self.euch_by_seat[i] / self.neuch * 100.0 for i in range(4)],
-            'euch_pct_by_suit' : [self.euch_by_suit[i] / self.neuch * 100.0 for i in range(3)],
-            'pts_ratio_by_card': [self.pts_by_card[i] / self.tpts_by_card[i] * 100.0 \
-                                  if self.tpts_by_card[i] else None for i in range(9)],
-            'pts_ratio_by_pos' : [self.pts_by_pos[i] / self.tpts_by_pos[i] * 100.0 \
-                                  if self.tpts_by_pos[i] else None for i in range(8)],
-            'pts_ratio_by_seat': [self.pts_by_seat[i] / self.tpts_by_seat[i] * 100.0 \
-                                  if self.tpts_by_seat[i] else None for i in range(4)],
-            'pts_ratio_by_suit': [self.pts_by_suit[i] / self.tpts_by_suit[i] * 100.0 \
-                                  if self.tpts_by_suit[i] else None for i in range(3)]
-        }
-        if info:
-            log.info(info + ':')
-        log.info(prettyprint(stats_agg, sort_keys=False, noprint=True))
 
 class Match(object):
     """Represents a set of games (race to 2, by default) played by two teams
@@ -160,7 +87,7 @@ class Match(object):
           - win percent by turncard, position, seat, and (relative) suit
           - points ratio by turncard, position, seat, and (relative) suit
         """
-        self.stats = MatchStats()
+        self.stats = GameStats()
         stats = self.stats
 
         for game in self.games:
@@ -284,7 +211,7 @@ class Game(object):
           - win percent by turncard, position, seat, and (relative) suit
           - points ratio by turncard, position, seat, and (relative) suit
         """
-        self.stats = MatchStats()
+        self.stats = GameStats()
         stats = self.stats
 
         for deal in self.deals:
@@ -340,12 +267,12 @@ class Game(object):
 # Deal #
 ########
 
-class DealStats(object):
+class PlayTracking(object):
     """
     """
     def __init__(self, deal):
         if not deal.contract:
-            raise LogicError("Contract must be set for DealStats deal")
+            raise LogicError("Contract must be set for PlayTracking deal")
 
         self.deal   = deal
         self.unseen = [[], [], [], []]
@@ -402,6 +329,7 @@ class Deal(object):
         self.tricks     = None  # [(winner_hand, [cards]), ...]
         self.score      = [0, 0]  # tricks won, by team
         self.winner     = None
+        self.tracking   = None
         self.stats      = None
         self.replays    = 0
 
@@ -423,6 +351,7 @@ class Deal(object):
         self.tricks     = None
         self.score      = [0, 0]
         self.winner     = None
+        self.tracking   = None
         self.stats      = None
         self.replays    += 1
 
@@ -548,7 +477,7 @@ class Deal(object):
                 raise RuntimeError("Discard should not be in dealer hand")
             if len(self.bids) > 4 and self.turncard in dealer_hand.cards:
                 raise RuntimeError("Turncard should not be in dealer hand")
-            self.stats = DealStats(self)
+            self.tracking = PlayTracking(self)
             self.log_info('hands')
         else:
             log.info("Deal is passed")
@@ -621,7 +550,7 @@ class Deal(object):
                 cards.append(card)
                 plays.append((player, card))
                 if card:
-                    self.stats.card_seen(card)
+                    self.tracking.card_seen(card)
                     if not winning_card:
                         winning = (player, card)
                         note = ' (currently winning)'
@@ -791,7 +720,7 @@ def test(seed, ndeals, debug):
                   (game.winner['name'], game.gameno,
                    game.score[idx], game.score[idx^0x01]))
             game.compute_stats()
-            #prettyprint(game.stats.__dict__)
+            #utils.prettyprint(game.stats.__dict__, sort_keys=False)
 
             if match.winner:
                 idx = match.winner['idx']
@@ -799,7 +728,7 @@ def test(seed, ndeals, debug):
                       (match.winner['name'],
                        match.games_won[idx], match.games_won[idx^0x01]))
                 match.compute_stats()
-                #prettyprint(match.stats.__dict__)
+                #utils.prettyprint(match.stats.__dict__, sort_keys=False)
                 break
 
             game = match.newgame()
@@ -815,10 +744,10 @@ def test(seed, ndeals, debug):
                    TEAMS[0]['name'], game.score[0],
                    TEAMS[1]['name'], game.score[1]))
             game.compute_stats()
-            #prettyprint(game.stats.__dict__)
+            #utils.prettyprint(game.stats.__dict__, sort_keys=False)
 
         match.compute_stats()
-        #prettyprint(match.stats.__dict__)
+        #utils.prettyprint(match.stats.__dict__, sort_keys=False)
 
     match.stats.log_agg("Match stats")
     return 0

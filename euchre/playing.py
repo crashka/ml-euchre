@@ -22,8 +22,8 @@ def play(hand, plays, winning):
     trick_no      = len(deal.tricks) + 1
     play_pos      = len(plays)  # 0 = lead, etc.
     tru_idx       = deal.contract['idx']
-    trump_seen    = deal.stats.seen[tru_idx]
-    trump_unseen  = deal.stats.unseen[tru_idx]
+    trump_seen    = deal.tracking.seen[tru_idx]
+    trump_unseen  = deal.tracking.unseen[tru_idx]
     if plays:
         lead_card    = plays[0][1]
         lead_idx     = lead_card.suit['idx']
@@ -36,7 +36,7 @@ def play(hand, plays, winning):
     singletons    = [s[0] for s in hand.suitcards
                      if len(s) == 1 and s[0].suit['idx'] != tru_idx]
     missing_trump = set(trump_unseen).difference(trump_cards)  # note: set!!!
-    my_high_cards = [c for c in deal.stats.high_cards
+    my_high_cards = [c for c in deal.tracking.high_cards
                      if c in hand.cards and c.suit['idx'] != tru_idx]
 
     ########################
@@ -286,7 +286,7 @@ def play(hand, plays, winning):
                 # take the trick
                 # REVISIT: are there cases where we want to play a higher trump, or other
                 # reasons to throw off (esp. if pos == 1 and partner yet to play)???
-                if len(trump_cards) > 1 or trump_cards[0] not in deal.stats.high_cards:
+                if len(trump_cards) > 1 or trump_cards[0] not in deal.tracking.high_cards:
                     log.debug("Play lowest trump, to lead trick")
                     return trump_cards[0]
 
