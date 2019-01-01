@@ -62,7 +62,7 @@ class LogicError(Exception):
 ##################
 
 # LATER: only use configured value if debug/dev mode!!!
-random.seed(param.get('random_seed'))
+#random.seed(param.get('random_seed'))
 
 def validate_basedata(basedata, offset = 0):
     """Make sure that the embedded index for base data elements matches the position

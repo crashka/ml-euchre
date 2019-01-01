@@ -276,7 +276,7 @@ class Hand(object):
             # pushed into HandAnaly, one way or another!)
             turn_idx = turncard.suit['idx']
             if self.pos in (0, 2):
-                penalty = turncard.efflevel[turn_idx] // 2
+                penalty = turncard.efflevel[turn_idx]
                 self.analysis[turn_idx].hand_score -= penalty
             elif self.pos == 1:
                 reward = turncard.efflevel[turn_idx] // 2

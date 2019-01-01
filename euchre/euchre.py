@@ -10,7 +10,7 @@ import types
 
 from core import log, RANKS, SUITS, CARDS, SEATS, TEAMS, right, LogicError
 from hand import Card, Hand
-from stats import GameStats
+from stats import PlayStats, MatchStats
 
 ###################
 # Constants, etc. #
@@ -26,6 +26,8 @@ GAME_POINTS_DFLT = 10
 class Match(object):
     """Represents a set of games (race to 2, by default) played by two teams
     """
+    matchstats = MatchStats()
+
     def __init__(self, bidding, playing, match_games = MATCH_GAMES_DFLT,
                  game_points = GAME_POINTS_DFLT):
         """
@@ -52,7 +54,7 @@ class Match(object):
         self.curgame     = None
         self.games_won   = [0, 0]
         self.winner      = None  # team
-        self.stats       = None  # later
+        self.teamstats   = None
 
     def newgame(self):
         """
@@ -74,6 +76,7 @@ class Match(object):
                     self.winner = TEAMS[idx]
                     log.info("%s wins match, games: %d-%d" %
                              (TEAMS[idx]['name'], self.games_won[idx], self.games_won[idx^0x01]))
+                    self.compute_stats()
                     return
 
         idx = 0 if self.games_won[0] > self.games_won[1] else 1
@@ -87,48 +90,12 @@ class Match(object):
           - win percent by turncard, position, seat, and (relative) suit
           - points ratio by turncard, position, seat, and (relative) suit
         """
-        self.stats = GameStats()
-        stats = self.stats
-
+        self.teamstats = [PlayStats(), PlayStats()]
         for game in self.games:
-            stats.npass += game.stats.npass
-            stats.nbid  += game.stats.nbid
-            stats.nmake += game.stats.nmake
-            stats.nall  += game.stats.nall
-            stats.neuch += game.stats.neuch
+            self.teamstats[0].rollup(game.teamstats[0])
+            self.teamstats[1].rollup(game.teamstats[1])
 
-            for card in range(9):
-                stats.pass_by_card[card] += game.stats.pass_by_card[card]
-                stats.bid_by_card[card]  += game.stats.bid_by_card[card]
-                stats.make_by_card[card] += game.stats.make_by_card[card]
-                stats.all_by_card[card]  += game.stats.all_by_card[card]
-                stats.pts_by_card[card]  += game.stats.pts_by_card[card]
-                stats.tpts_by_card[card] += game.stats.tpts_by_card[card]
-                stats.euch_by_card[card] += game.stats.euch_by_card[card]
-
-            for pos in range(8):
-                stats.bid_by_pos[pos]    += game.stats.bid_by_pos[pos]
-                stats.make_by_pos[pos]   += game.stats.make_by_pos[pos]
-                stats.all_by_pos[pos]    += game.stats.all_by_pos[pos]
-                stats.pts_by_pos[pos]    += game.stats.pts_by_pos[pos]
-                stats.tpts_by_pos[pos]   += game.stats.tpts_by_pos[pos]
-                stats.euch_by_pos[pos]   += game.stats.euch_by_pos[pos]
-
-            for seat in range(4):
-                stats.bid_by_seat[seat]  += game.stats.bid_by_seat[seat]
-                stats.make_by_seat[seat] += game.stats.make_by_seat[seat]
-                stats.all_by_seat[seat]  += game.stats.all_by_seat[seat]
-                stats.pts_by_seat[seat]  += game.stats.pts_by_seat[seat]
-                stats.tpts_by_seat[seat] += game.stats.tpts_by_seat[seat]
-                stats.euch_by_seat[seat] += game.stats.euch_by_seat[seat]
-
-            for suit in range(3):
-                stats.bid_by_suit[suit]  += game.stats.bid_by_suit[suit]
-                stats.make_by_suit[suit] += game.stats.make_by_suit[suit]
-                stats.all_by_suit[suit]  += game.stats.all_by_suit[suit]
-                stats.pts_by_suit[suit]  += game.stats.pts_by_suit[suit]
-                stats.tpts_by_suit[suit] += game.stats.tpts_by_suit[suit]
-                stats.euch_by_suit[suit] += game.stats.euch_by_suit[suit]
+        Match.matchstats.update(self)
 
 ########
 # Game #
@@ -147,7 +114,7 @@ class Game(object):
         self.curdeal     = None
         self.score       = [0, 0]  # points by team
         self.winner      = None  # team
-        self.stats       = None  # later
+        self.teamstats   = None
 
     @property
     def gameno(self):
@@ -196,6 +163,7 @@ class Game(object):
                     log.info("%s wins game #%d, score: %d-%d" %
                              (TEAMS[idx]['name'], self.gameno,
                               self.score[idx], self.score[idx^0x01]))
+                    self.compute_stats()
                     self.match.update_score([int(bool(pts)) for pts in team_points])
                     return
 
@@ -211,57 +179,10 @@ class Game(object):
           - win percent by turncard, position, seat, and (relative) suit
           - points ratio by turncard, position, seat, and (relative) suit
         """
-        self.stats = GameStats()
-        stats = self.stats
-
+        self.teamstats = [PlayStats(), PlayStats()]
         for deal in self.deals:
-            card = deal.stats['turncard']
-            pos  = deal.stats['call_pos']
-            if pos is None:
-                stats.npass += 1
-                stats.pass_by_card[card] += 1
-                continue
-
-            seat = deal.stats['call_seat']
-            suit = deal.stats['call_suit']
-            pts  = deal.stats['points']
-
-            stats.nbid += 1
-            stats.bid_by_card[card] += 1
-            stats.bid_by_pos[pos]   += 1
-            stats.bid_by_seat[seat] += 1
-            stats.bid_by_suit[suit] += 1
-
-            if pts > 0:
-                stats.nmake += 1
-                stats.make_by_card[card] += 1
-                stats.make_by_pos[pos]   += 1
-                stats.make_by_seat[seat] += 1
-                stats.make_by_suit[suit] += 1
-                if pts > 1:
-                    stats.nall += 1
-                    stats.all_by_card[card] += 1
-                    stats.all_by_pos[pos]   += 1
-                    stats.all_by_seat[seat] += 1
-                    stats.all_by_suit[suit] += 1
-                stats.pts_by_card[card]  += pts
-                stats.pts_by_pos[pos]    += pts
-                stats.pts_by_seat[seat]  += pts
-                stats.pts_by_suit[suit]  += pts
-                stats.tpts_by_card[card] += pts
-                stats.tpts_by_pos[pos]   += pts
-                stats.tpts_by_seat[seat] += pts
-                stats.tpts_by_suit[suit] += pts
-            elif pts < 0:
-                stats.neuch += 1
-                stats.euch_by_card[card] += 1
-                stats.euch_by_pos[pos]   += 1
-                stats.euch_by_seat[seat] += 1
-                stats.euch_by_suit[suit] += 1
-                stats.tpts_by_card[card] += -pts
-                stats.tpts_by_pos[pos]   += -pts
-                stats.tpts_by_seat[seat] += -pts
-                stats.tpts_by_suit[suit] += -pts
+            team_idx = deal.stats['call_seat'] & 0x01
+            self.teamstats[team_idx].update(deal.stats)
 
 ########
 # Deal #
@@ -330,7 +251,7 @@ class Deal(object):
         self.score      = [0, 0]  # tricks won, by team
         self.winner     = None
         self.tracking   = None
-        self.stats      = None
+        self.stats      = None  # dict (for now)
         self.replays    = 0
 
     def reset(self):
@@ -379,8 +300,8 @@ class Deal(object):
         if bid:
             self.playtricks()
             self.tabulate()
-
-        self.compute_stats()
+        else:
+            self.compute_stats()
 
     def shuffle(self, force = False):
         """
@@ -601,6 +522,7 @@ class Deal(object):
                      (TEAMS[defender_idx]['name'], self.dealno, self.score[defender_idx],
                       self.score[caller_idx], team_points[defender_idx]))
 
+        self.compute_stats()
         self.game.update_score(team_points)
 
     def compute_stats(self):
@@ -642,7 +564,9 @@ class Deal(object):
         else:
             self.stats = {'deal_seat': deal_seat,
                           'turncard' : self.turncard.level,
-                          'call_pos' : None}
+                          'call_pos' : None,
+                          'call_seat': deal_seat,  # for computing stats
+                          'call_suit': None}
 
     def log_info(self, *what):
         """
@@ -677,79 +601,65 @@ import playing
 from core import param, dflt_hand, dbg_hand
 import utils
 
-MAX_DEALS = 1000
+MAX_DEALS = 1000000
 
 @click.command()
-@click.option('--seed',   '-s', default=None, type=int, help="Seed for random module")
-@click.option('--ndeals', '-n', default=None, type=int, help="Number of deals")
-@click.option('--debug',  '-d', default=0, help="Debug level")
-def test(seed, ndeals, debug):
-    """Play a single game, print out ML features
+@click.option('--matches', '-m', default=1,    type=int, help="Number of matches to play")
+@click.option('--ndeals',  '-n', default=None, type=int, help="Max number of deals")
+@click.option('--debug',   '-d', default=0,    type=int, help="Debug level (0-2)")
+@click.option('--seed',    '-s', default=None, type=int, help="Seed for random module")
+def test(matches, ndeals, debug, seed):
+    """Play one or more complete matches, print out aggregate stats across matches
     """
+    ndeals = ndeals or MAX_DEALS
     debug = debug or int(param.get('debug') or 0)
     if debug > 0:
         log.setLevel(utils.TRACE if debug > 1 else logging.DEBUG)
         dflt_hand.setLevel(utils.TRACE if debug > 1 else logging.DEBUG)
-        #dbg_hand.setLevel(utils.TRACE if debug > 1 else logging.DEBUG)
-        #log.addHandler(dbg_hand)
+    random.seed(seed)
 
-    if seed:
-        random.seed(seed)
+    for imatch in range(matches):
+        match = Match(bidding, playing)
+        game = match.newgame()
+        while ndeals > 0:
+            deal = game.newdeal()
+            deal.play()
+            #print(deal.stats)
+            ndeals -= 1
 
-    match = Match(bidding, playing)
-    game = match.newgame()
-    for i in range(ndeals or MAX_DEALS):
-        deal = game.newdeal()
-        deal.play()
+            if game.winner:
+                idx = game.winner['idx']
+                print("%s wins game #%d, score: %d-%d" %
+                      (game.winner['name'], game.gameno,
+                       game.score[idx], game.score[idx^0x01]))
 
-        """
-        if deal.caller:
-            caller_idx   = deal.caller.team_idx
-            tricks_made  = deal.score[caller_idx]
-            ml_features = (len(deal.bids) - 1,  # bidder position, 0-7 (3 and 7 are dealer)
-                           int(deal.play_alone),
-                           *deal.caller.features(deal.contract),
-                           tricks_made)
-            print("ML features: %s" % (list(ml_features)))
-        """
-        print(deal.stats)
+                if match.winner:
+                    idx = match.winner['idx']
+                    print("  %s wins match #%d, games: %d-%d" %
+                          (match.winner['name'], imatch + 1,
+                           match.games_won[idx], match.games_won[idx^0x01]))
+                    break
 
-        if game.winner:
-            idx = game.winner['idx']
-            print("%s wins game #%d, score: %d-%d" %
-                  (game.winner['name'], game.gameno,
-                   game.score[idx], game.score[idx^0x01]))
-            game.compute_stats()
-            #utils.prettyprint(game.stats.__dict__, sort_keys=False)
+                game = match.newgame()
+                continue
 
-            if match.winner:
-                idx = match.winner['idx']
-                print("%s wins match, games: %d-%d" %
-                      (match.winner['name'],
-                       match.games_won[idx], match.games_won[idx^0x01]))
-                match.compute_stats()
-                #utils.prettyprint(match.stats.__dict__, sort_keys=False)
-                break
+        if not match.winner:
+            print("Score for match #%d: %s %d, %s %d" %
+                  (imatch + 1,
+                   TEAMS[0]['name'], match.games_won[0],
+                   TEAMS[1]['name'], match.games_won[1]))
+            if not game.winner:
+                print("Score for game #%d: %s %d, %s %d" %
+                      (game.gameno,
+                       TEAMS[0]['name'], game.score[0],
+                       TEAMS[1]['name'], game.score[1]))
+                game.compute_stats()
 
-            game = match.newgame()
-            continue
+            match.compute_stats()
 
-    if not match.winner:
-        print("Score for match: %s %d, %s %d" %
-              (TEAMS[0]['name'], match.games_won[0],
-               TEAMS[1]['name'], match.games_won[1]))
-        if not game.winner:
-            print("Score for game #%d: %s %d, %s %d" %
-                  (game.gameno,
-                   TEAMS[0]['name'], game.score[0],
-                   TEAMS[1]['name'], game.score[1]))
-            game.compute_stats()
-            #utils.prettyprint(game.stats.__dict__, sort_keys=False)
-
-        match.compute_stats()
-        #utils.prettyprint(match.stats.__dict__, sort_keys=False)
-
-    match.stats.log_agg("Match stats")
+    matchstats_agg = Match.matchstats.compute_agg()
+    for k, v in matchstats_agg.items():
+        print("%20s: %s" % (k, v))
     return 0
 
 if __name__ == '__main__':
