@@ -70,7 +70,7 @@ def play(hand, plays, winning):
           You may need the trump to make your point.
         * If your partner calls next and leads a trump, DO NOT lead trump back.
         """
-        if deal.is_next_call:
+        if deal.is_next_call and trump_cards:
             if not hand.has_bower:
                 log.debug("No bower, lead small trump")
                 hand.strategy.append(Strategy.PRESERVE_TRUMP)

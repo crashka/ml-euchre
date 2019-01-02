@@ -7,6 +7,7 @@
 import logging
 import random
 import types
+import copy
 
 from core import log, RANKS, SUITS, CARDS, SEATS, TEAMS, right, LogicError
 from hand import Card, Hand
@@ -151,6 +152,15 @@ class Game(object):
         self.deals.append(self.curdeal)
         return self.curdeal
 
+    def replaydeal(self):
+        """
+        :return: copy of Deal instance (reset)
+        """
+        self.curdeal = copy.copy(self.curdeal)
+        self.curdeal.reset()
+        self.deals.append(self.curdeal)
+        return self.curdeal
+
     def update_score(self, team_points):
         """Update score based on completed deal (self.curdeal), called by Deal.tabulate
         """
@@ -252,11 +262,15 @@ class Deal(object):
         self.winner     = None
         self.tracking   = None
         self.stats      = None  # dict (for now)
-        self.replays    = 0
+        self.replay     = 0
 
     def reset(self):
         """Reset all deal state other than deck, so we can replay the deal
         """
+        # don't have to create new Card instances, just reparent to current deal
+        # (kind of ugly, but saves a few cycles)
+        for card in self.deck:
+            card.deal = self
         self.hands      = None
         self.bury       = None
         self.turncard   = None
@@ -274,7 +288,7 @@ class Deal(object):
         self.winner     = None
         self.tracking   = None
         self.stats      = None
-        self.replays    += 1
+        self.replay     += 1
 
     @property
     def dealno(self):
@@ -290,9 +304,9 @@ class Deal(object):
         if self.game.winner:
             raise RuntimeError("Cannot deal when game is already over (winner: %s)" %
                                (self.game.winner['name']))
-        # shuffle and deal
-        self.log_info('header')
-        self.shuffle()
+        if not self.replay:
+            self.log_info('header')
+            self.shuffle()
         self.deal()
 
         # bidding and playing tricks

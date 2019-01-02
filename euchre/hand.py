@@ -8,12 +8,12 @@ from core import log, TEAMS, SUITS, ALLRANKS, ace, king, queen, jack, ten, nine,
 ########
 
 class Card(object):
-    """Represents an instance of a card that is part of a deal; the "basecard"
-    is the underlying immutable card identity (e.g. rank, suit, and name) that is
-    independent of deal status, trump, etc.
+    """Represents an instance of a card that is part of a deal/deck; the "base" card
+    is the underlying immutable identity (i.e. CARDS[n]) that indicates rank, suit,
+    and name, independent of deal status, trump, etc.
     """
-    def __init__(self, basecard, deal):
-        self.base = basecard
+    def __init__(self, base, deal):
+        self.base = base
         self.deal = deal
         # effective level and suit are based on trump suit
         self.efflevel = [self.base['level']] * 4
