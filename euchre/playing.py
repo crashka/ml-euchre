@@ -420,7 +420,7 @@ def play(hand, plays, winning):
                     play_random_card]
 
     def apply(ruleset):
-        """
+        """TODO: move to core (currently replicated across modules)!!!
         """
         res = None
         for rule in ruleset:
