@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 from core import log, SUITS, LogicError
-from bidding import discard
+from bidding import analyze, bid_features
 
 ###########
 # Bidding #
@@ -45,6 +45,7 @@ def bid(hand):
 ########
 
 import sys
+import os.path
 import logging
 import random
 import datetime as dt
@@ -52,7 +53,7 @@ import csv
 
 import click
 
-from core import param, dflt_hand, dbg_hand, TEAMS
+from core import BASE_DIR, param, dflt_hand, dbg_hand, TEAMS
 from euchre import Match
 import playing
 import utils
@@ -60,12 +61,23 @@ import utils
 mymodule  = sys.modules[__name__]
 MAX_DEALS = 1000000
 
+MODELS_DIR = 'models'
+TDATA_DIR  = 'training_data'
+MODEL_NAME = 'bid_stage1'
+
+def tdata_file(run_id):
+    filename  = 'tdata_' + run_id
+    return os.path.join(BASE_DIR, MODELS_DIR, MODEL_NAME, TDATA_DIR, filename)
+
 @click.command()
-@click.option('--ndeals',  '-n', default=None, type=int, help="Max number of deals")
+@click.option('--ndeals',  '-n', default=1,    type=int, help="Number of deals to run through")
 @click.option('--debug',   '-d', default=0,    type=int, help="Debug level (0-2)")
 @click.option('--seed',    '-s', default=None, type=int, help="Seed for random module")
 def main(ndeals, debug, seed):
-    """Play one or more complete matches, print out aggregate stats across matches
+    """Generate training data for Stage 1 bidding model
+
+    Currently hardwired to use the default "playing" module for playing out the hand
+    (though we can make this configurable later)
     """
     ndeals = ndeals or MAX_DEALS
     debug = debug or int(param.get('debug') or 0)
@@ -73,7 +85,7 @@ def main(ndeals, debug, seed):
         log.setLevel(utils.TRACE if debug > 1 else logging.DEBUG)
         dflt_hand.setLevel(utils.TRACE if debug > 1 else logging.DEBUG)
     random.seed(seed)
-    dsname = 's1data_' + dt.datetime.now().strftime('%Y%m%d%H%M%S')
+    dsname = tdata_file(dt.datetime.now().strftime('%Y%m%d%H%M%S'))
     features = []
 
     match = Match(mymodule, playing, game_points=MAX_DEALS)
@@ -87,7 +99,7 @@ def main(ndeals, debug, seed):
                 tricks_made  = deal.score[caller_idx]
                 ml_features = (len(deal.bids) - 1,  # bidder position, 0-7 (3 and 7 are dealer)
                                int(deal.play_alone),
-                               *deal.caller.features(deal.contract),
+                               *deal.caller.bid_features(deal.contract),
                                tricks_made)
                 features.append(ml_features)
                 #print("ML features: %s" % (list(ml_features)))
@@ -101,7 +113,7 @@ def main(ndeals, debug, seed):
         game.compute_stats()
 
     with open(dsname + '.csv', 'w', newline='') as f:
-        writer = csv.writer(f)
+        writer = csv.writer(f, lineterminator='\n')
         writer.writerows(features)
 
     match.compute_stats()

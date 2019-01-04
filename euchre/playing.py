@@ -4,11 +4,86 @@
 import random
 from enum import Enum, auto
 
-from core import log, ace, right
+from core import log, ALLRANKS, ace, right, left
 
 class Strategy(Enum):
     DRAW_TRUMP     = auto()
     PRESERVE_TRUMP = auto()
+
+class PlayAnalysis(object):
+    """Analysis for a hand and specified trump suit
+
+    TODO: need to transition this class into the bidding module, to keep the Hand
+    class/module as unopinionated (relative to strategy) as possible!!!
+    """
+    def __init__(self, cards, trump):
+        self.cards        = cards.copy()
+        self.trump        = trump
+        self.suitcards    = [[], [], [], []]
+        self.strategy     = []    # list of Strategy enum values
+
+        for card in self.cards:
+            suit_idx = card.suit['idx']
+            self.suitcards[suit_idx].append(card)
+
+        tru_idx = self.trump['idx']
+        self.suitcards[tru_idx].sort(key=lambda c: c.efflevel[tru_idx])
+
+    @property
+    def has_bower(self):
+        """
+        :return: true if one or more bowers in hand
+        """
+        tru_cards = self.trump_cards
+        return tru_cards and tru_cards[-1].level >= left['level']
+
+    @property
+    def has_off_ace(self):
+        """
+        :return: true if one or more off aces in hand
+        """
+        return len(self.off_aces) > 0
+
+    @property
+    def trump_cards(self):
+        """
+        :return: list of cards
+        """
+        tru_idx = self.trump['idx']
+        return self.suitcards[tru_idx]
+
+    @property
+    def green_suitcards(self):
+        """
+        :return: tuple (two lists of cards)
+        """
+        tru_idx = self.trump['idx']
+        grn_cards = self.suitcards[tru_idx ^ 0x01]
+        pur_cards = self.suitcards[tru_idx ^ 0x02]
+        return (grn_cards, pur_cards) if len(grn_cards) >= len(pur_cards) \
+            else (pur_cards, grn_cards)
+
+    @property
+    def off_aces(self):
+        """
+        :return: list
+        """
+        return [scs[-1] for scs in self.suitcards
+                if scs and scs[-1].rank == ace and scs[-1].suit != self.trump]
+
+    def play_card(self, card):
+        """
+        :param card: Card (must be in analysis structure)
+        """
+        suit_idx = card.suit['idx']
+        self.cards.remove(card)
+        self.suitcards[suit_idx].remove(card)
+        return card
+
+def analyze(hand, trump):
+    """Allocate and initialize play analysis structure based on trump
+    """
+    return PlayAnalysis(hand.cards, trump)
 
 def play(hand, plays, winning):
     """
@@ -31,13 +106,15 @@ def play(hand, plays, winning):
         lead_trumped = lead_card.suit['idx'] != tru_idx and winning_card.suit['idx'] == tru_idx
 
     # hand stats
-    trump_cards   = hand.trump_cards
-    off_aces      = hand.off_aces
-    singletons    = [s[0] for s in hand.suitcards
+    analysis     = hand.play_analysis
+    play_strategy = analysis.strategy
+    trump_cards   = analysis.trump_cards
+    off_aces      = analysis.off_aces
+    singletons    = [s[0] for s in analysis.suitcards
                      if len(s) == 1 and s[0].suit['idx'] != tru_idx]
     missing_trump = set(trump_unseen).difference(trump_cards)  # note: set!!!
     my_high_cards = [c for c in deal.tracking.high_cards
-                     if c in hand.cards and c.suit['idx'] != tru_idx]
+                     if c in analysis.cards and c.suit['idx'] != tru_idx]
 
     ########################
     # play selection rules #
@@ -50,9 +127,9 @@ def play(hand, plays, winning):
     def lead_last_card():
         """
         """
-        if len(hand.cards) == 1:
+        if len(analysis.cards) == 1:
             log.debug("Lead last card")
-            return hand.cards[0]
+            return analysis.cards[0]
 
     def next_call_lead():
         """Especially if calling with weaker hand...
@@ -71,36 +148,36 @@ def play(hand, plays, winning):
         * If your partner calls next and leads a trump, DO NOT lead trump back.
         """
         if deal.is_next_call and trump_cards:
-            if not hand.has_bower:
+            if not analysis.has_bower:
                 log.debug("No bower, lead small trump")
-                hand.strategy.append(Strategy.PRESERVE_TRUMP)
+                play_strategy.append(Strategy.PRESERVE_TRUMP)
                 return trump_cards[0]
             elif len(trump_cards) > 1:
                 if trump_cards[-1].rank == right and trump_cards[-2].rank == ace:
                     log.debug("Lead ace from right-ace")
-                    hand.strategy.append(Strategy.DRAW_TRUMP)
+                    play_strategy.append(Strategy.DRAW_TRUMP)
                     return trump_cards[-2]
                 if trump_cards[-1].level < ace['level']:
-                    grn_suitcards = hand.green_suitcards
+                    grn_suitcards = analysis.green_suitcards
                     if grn_suitcards[0]:
                         log.debug("Lead from longest green suit")
-                        hand.strategy.append(Strategy.PRESERVE_TRUMP)
+                        play_strategy.append(Strategy.PRESERVE_TRUMP)
                         return grn_suitcards[0][0]
 
     def draw_trump():
         """Draw trump if caller (strong hand), or flush out bower
         """
         if hand == deal.caller and missing_trump:
-            if Strategy.DRAW_TRUMP in hand.strategy:
+            if Strategy.DRAW_TRUMP in play_strategy:
                 if len(trump_cards) > 2:
                     log.debug("Continue drawing trump")
                     return trump_cards[-1]
                 elif len(trump_cards) >= 2:
                     log.debug("Last round of drawing trump")
-                    hand.strategy.remove(Strategy.DRAW_TRUMP)
+                    play_strategy.remove(Strategy.DRAW_TRUMP)
                     return trump_cards[-1]
             elif len(trump_cards) >= 3:
-                hand.strategy.append(Strategy.DRAW_TRUMP)
+                play_strategy.append(Strategy.DRAW_TRUMP)
                 log.debug("Draw trump (or flush out bower)")
                 return trump_cards[-1]
 
@@ -122,7 +199,7 @@ def play(hand, plays, winning):
         """
         if hand.is_partner(deal.caller):
             if trump_cards and not trump_seen:
-                if hand.has_bower:
+                if analysis.has_bower:
                     log.debug("Lead bower to partner's call")
                     return trump_cards[-1]
                 elif len(trump_cards) > 1:
@@ -164,9 +241,9 @@ def play(hand, plays, winning):
     def lead_low_non_trump():
         """If still trump in hand, lead lowest card (non-trump)
         """
-        if trump_cards and len(trump_cards) < len(hand.cards):
+        if trump_cards and len(trump_cards) < len(analysis.cards):
             # NOTE: will always pick the "lowest" suit if multiple cards at min level
-            non_trump_cards = [c for c in hand.cards if c.suit['idx'] != tru_idx]
+            non_trump_cards = [c for c in analysis.cards if c.suit['idx'] != tru_idx]
             non_trump_cards.sort(key=lambda c: c.efflevel[tru_idx])
             log.debug("Lead lowest non-trump")
             return non_trump_cards[0]
@@ -176,7 +253,7 @@ def play(hand, plays, winning):
 
         Note: always returns value, can be last in ruleset
         """
-        suitcards = hand.suitcards.copy()
+        suitcards = analysis.suitcards.copy()
         suitcards.sort(key=lambda s: len(s))
         # TODO: a little more logic in choosing suit (perhaps avoid trump, if possible)!!!
         log.debug("Lead low from longest suit")
@@ -189,7 +266,7 @@ def play(hand, plays, winning):
         Note: always returns value, can be last in ruleset
         """
         log.debug("Lead random card")
-        return random.choice(hand.cards)
+        return random.choice(analysis.cards)
 
     #-------------------#
     # Follow Card Plays #
@@ -198,17 +275,17 @@ def play(hand, plays, winning):
     def play_last_card():
         """
         """
-        if len(hand.cards) == 1:
+        if len(analysis.cards) == 1:
             log.debug("Play last card")
-            return hand.cards[0]
+            return analysis.cards[0]
 
     def follow_suit_low():
         """Follow suit low
         """
-        if hand.suitcards[lead_idx]:
+        if analysis.suitcards[lead_idx]:
             # REVISIT: are there cases where we want to try and take the lead???
             log.debug("Follow suit low")
-            return hand.suitcards[lead_idx][0]
+            return analysis.suitcards[lead_idx][0]
 
     def throw_off_to_create_void():
         """Create void (if early in deal)--NOTE: this only matters if we've decided not
@@ -228,9 +305,9 @@ def play(hand, plays, winning):
     def throw_off_low():
         """Throw off lowest non-trump card
         """
-        if len(trump_cards) < len(hand.cards):
+        if len(trump_cards) < len(analysis.cards):
             # NOTE: this will always pick the "lowest" suit in case multiple cards at min level
-            non_trump_cards = [c for c in hand.cards if c.suit['idx'] != tru_idx]
+            non_trump_cards = [c for c in analysis.cards if c.suit['idx'] != tru_idx]
             non_trump_cards.sort(key=lambda c: c.efflevel[tru_idx])
             log.debug("Throw-off lowest non-trump")
             return non_trump_cards[0]
@@ -238,7 +315,7 @@ def play(hand, plays, winning):
     def play_low_trump():
         """Play lowest trump (assumes no non-trump remaining)
         """
-        if trump_cards and len(trump_cards) == len(hand.cards):
+        if trump_cards and len(trump_cards) == len(analysis.cards):
             # REVISIT: are there cases where we want to play a higher trump???
             log.debug("Play lowest trump")
             return trump_cards[0]
@@ -246,24 +323,24 @@ def play(hand, plays, winning):
     def follow_suit_high():
         """Follow suit (high if can lead trick, low otherwise)
         """
-        if hand.suitcards[lead_idx]:
+        if analysis.suitcards[lead_idx]:
             if lead_trumped:
                 log.debug("Follow suit low")
-                return hand.suitcards[lead_idx][0]
-            if hand.suitcards[lead_idx][-1].level > winning_card.level:
+                return analysis.suitcards[lead_idx][0]
+            if analysis.suitcards[lead_idx][-1].level > winning_card.level:
                 # REVISIT: are there cases where we don't want to try and take the trick,
                 # or not play???
                 if play_pos == 3:
-                    for card in hand.suitcards[lead_idx]:
+                    for card in analysis.suitcards[lead_idx]:
                         if card.level > winning_card.level:
                             log.debug("Follow suit, take winner")
                             return card
                 else:
                     log.debug("Follow suit high")
-                    return hand.suitcards[lead_idx][-1]
+                    return analysis.suitcards[lead_idx][-1]
 
             log.debug("Follow suit low")
-            return hand.suitcards[lead_idx][0]
+            return analysis.suitcards[lead_idx][0]
 
     def trump_low():
         """Trump (low) to lead trick
@@ -298,12 +375,12 @@ def play(hand, plays, winning):
         if plays:
             lead_card = plays[0][1]
             suit_idx = lead_card.suit['idx']
-            if hand.suitcards[suit_idx]:
+            if analysis.suitcards[suit_idx]:
                 log.debug("Follow suit, random card")
-                return random.choice(hand.suitcards[suit_idx])
+                return random.choice(analysis.suitcards[suit_idx])
 
         log.debug("Play random card")
-        return random.choice(hand.cards)
+        return random.choice(analysis.cards)
 
     ###################
     # play strategies #
@@ -364,4 +441,4 @@ def play(hand, plays, winning):
         cur_winning = hand.is_partner(winning[0])
         ruleset = part_winning if cur_winning else opp_winning
 
-    return hand.play_card(apply(ruleset))
+    return analysis.play_card(apply(ruleset))

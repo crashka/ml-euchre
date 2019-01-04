@@ -154,10 +154,9 @@ class Game(object):
 
     def replaydeal(self):
         """
-        :return: copy of Deal instance (reset)
+        :return: create clone of current deal to replay bid/tricks
         """
-        self.curdeal = copy.copy(self.curdeal)
-        self.curdeal.reset()
+        self.curdeal = Deal(self, self.curdeal)
         self.deals.append(self.curdeal)
         return self.curdeal
 
@@ -238,7 +237,7 @@ class Deal(object):
     Note: our notion of a "deal" is also popularly called a "hand", but we are reserving that
     word to mean the holding of five dealt cards by a player during a deal
     """
-    def __init__(self, game):
+    def __init__(self, game, replay_deal = None):
         """
         """
         self.game       = game
@@ -262,37 +261,22 @@ class Deal(object):
         self.winner     = None
         self.tracking   = None
         self.stats      = None  # dict (for now)
-        self.replay     = 0
 
-    def reset(self):
-        """Reset all deal state other than deck, so we can replay the deal
-        """
-        # don't have to create new Card instances, just reparent to current deal
-        # (kind of ugly, but saves a few cycles)
-        for card in self.deck:
-            card.deal = self
-        self.hands      = None
-        self.bury       = None
-        self.turncard   = None
-        self.discard    = None
-
-        self.bids       = None
-        self.contract   = None
-        self.caller     = None
-        self.defender   = None
-        self.play_alone = False
-        self.dfnd_alone = False
-        self.plays      = None
-        self.tricks     = None
-        self.score      = [0, 0]
-        self.winner     = None
-        self.tracking   = None
-        self.stats      = None
-        self.replay     += 1
+        if replay_deal:
+            self.deck   = replay_deal.deck
+            # don't have to create new Card instances, just reparent to current deal
+            # (kind of ugly, but saves a few cycles)
+            for card in self.deck:
+                card.deal = self
+            self.replay = replay_deal.replay + 1
+        else:
+            self.replay = 0
 
     @property
     def dealno(self):
         """Only valid for current deal within game
+
+        Note that replays are counted as individual/incremental deals
         """
         assert self.game.curdeal == self
         return len(self.game.deals)
@@ -348,16 +332,16 @@ class Deal(object):
         self.hands.sort(key=lambda h: h.pos)
         self.bury = self.deck[cardno:]
         self.turncard = self.bury.pop()
-        self.log_info('hands')
+        for hand in self.hands:
+            hand.show_turncard(self.turncard)
 
+        self.log_info('hands')
         self.bids = []
 
     def bid(self):
         """
         :return: suit (trunp) or None (meaning passed deal)
         """
-        for hand in self.hands:
-            hand.analyze(self.turncard)
         dealer_hand = self.hands[3]
         if not dealer_hand.discard:
             raise RuntimeError("Dealer hand analysis must select best discard")
