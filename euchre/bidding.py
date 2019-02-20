@@ -300,7 +300,6 @@ def _bestdiscard(analysis, turncard):
 
     return apply(discard_logic)
 
-
 def bid(hand):
     """
     :return: suit or None (meaning "pass")
